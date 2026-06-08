@@ -20,7 +20,6 @@ Usage
 # Imports
 # ──────────────────────────────────────────────
 
-!pip install streamlit
 import io
 import warnings
 import numpy as np
