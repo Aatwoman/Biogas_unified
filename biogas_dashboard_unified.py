@@ -1,4 +1,3 @@
-
 """
 Biogas Plant Analytics Dashboard  ·  Universal Format  ·  Streamlit
 =====================================================================
@@ -765,23 +764,23 @@ def tab_gas(ops: pd.DataFrame, ma: int):
     with c1:
         st.plotly_chart(line_fig(ops, "date", "total_generated_gas",
                                   "Raw Biogas Generated", "m³/day", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_001")
     with c2:
         st.plotly_chart(line_fig(ops, "date", "total_purified_gas",
                                   "Purified Gas Output", "m³/day", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_002")
 
     c3, c4 = st.columns(2)
     with c3:
         st.plotly_chart(dual_line_fig(ops, "date",
                                        "raw_ch4", "CH₄", "raw_co2", "CO₂",
                                        "Raw Biogas Composition (%)"),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_003")
     with c4:
         st.plotly_chart(dual_line_fig(ops, "date",
                                        "pure_ch4", "CH₄", "pure_co2", "CO₂",
                                        "Purified Gas Composition (%)"),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_004")
 
     sec("⚠️ H₂S CONTAMINATION (PPM)")
     c5, c6 = st.columns(2)
@@ -789,23 +788,23 @@ def tab_gas(ops: pd.DataFrame, ma: int):
         fig = line_fig(ops, "date", "raw_h2s", "Raw Gas H₂S", "PPM", ma=ma)
         fig.add_hline(y=500, line_dash="dash", line_color="#ff5252",
                        annotation_text="Alert 500 PPM", annotation_font_color="#ff5252")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="chart_005")
     with c6:
         fig = line_fig(ops, "date", "pure_h2s", "Purified Gas H₂S", "PPM", ma=ma)
         fig.add_hline(y=50, line_dash="dash", line_color="#ffab40",
                        annotation_text="Target <50 PPM", annotation_font_color="#ffab40")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="chart_006")
 
     sec("📉 GAS BALANCE")
     c7, c8 = st.columns(2)
     with c7:
         st.plotly_chart(line_fig(ops, "date", "flare_m3",
                                   "Flare Gas (m³/day)", "m³", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_007")
     with c8:
         st.plotly_chart(line_fig(ops, "date", "gen_inlet_diff",
                                   "Gen–Inlet Differential (m³)", "m³", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_008")
 
 
 def tab_feed(ops: pd.DataFrame, ma: int):
@@ -814,24 +813,24 @@ def tab_feed(ops: pd.DataFrame, ma: int):
     with c1:
         st.plotly_chart(line_fig(ops, "date", "dung_tons",
                                   "Dung Collected (tons/day)", "tons", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_009")
     with c2:
         st.plotly_chart(line_fig(ops, "date", "total_feed_m3",
                                   "Total Feed to Reactor (m³/day)", "m³", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_010")
 
     c3, c4 = st.columns(2)
     with c3:
         st.plotly_chart(line_fig(ops, "date", "total_filter_water",
                                   "Filter Water Consumed (m³/day)", "m³", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_011")
     with c4:
         has_potato = ("waste_potato_tons" in ops.columns and
                       ops["waste_potato_tons"].notna().any())
         if has_potato:
             st.plotly_chart(line_fig(ops, "date", "waste_potato_tons",
                                       "Waste Potato Added (tons/day)", "tons", ma=ma),
-                            use_container_width=True)
+                            use_container_width=True, key="chart_012")
         else:
             st.info("No waste-potato data for selected plants / date range.")
 
@@ -845,7 +844,7 @@ def tab_feed(ops: pd.DataFrame, ma: int):
     st.plotly_chart(line_fig(ops2, "date", "yield_m3_per_ton",
                               "Biogas Yield (m³ per ton of dung)",
                               "m³/ton", ma=ma, height=400),
-                    use_container_width=True)
+                    use_container_width=True, key="chart_013")
 
 
 def tab_purif(ops: pd.DataFrame, ma: int):
@@ -856,21 +855,21 @@ def tab_purif(ops: pd.DataFrame, ma: int):
                        "Purification Efficiency (%)", "%", ma=ma)
         fig.add_hline(y=95, line_dash="dot", line_color="#69f0ae",
                        annotation_text="Target 95%", annotation_font_color="#69f0ae")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="chart_014")
     with c2:
         st.plotly_chart(line_fig(ops, "date", "bg_recovery",
                                   "Biogas Recovery (%)", "%", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_015")
 
     c3, c4 = st.columns(2)
     with c3:
         st.plotly_chart(line_fig(ops, "date", "cbg_sales_kg",
                                   "CBG Sales – Dispenser (kg/day)", "kg", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_016")
     with c4:
         st.plotly_chart(line_fig(ops, "date", "total_sales_kg",
                                   "Total CBG Sales incl. Cascade (kg/day)", "kg", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_017")
 
     sec("📅 MONTHLY CBG SALES")
     monthly = (ops.assign(month=ops["date"].dt.to_period("M").astype(str))
@@ -878,17 +877,17 @@ def tab_purif(ops: pd.DataFrame, ma: int):
     if not monthly.empty:
         st.plotly_chart(bar_fig(monthly, "month", "cbg_sales_kg",
                                  "Monthly CBG Sales (kg)", color="plant", height=420),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_018")
 
     c5, c6 = st.columns(2)
     with c5:
         st.plotly_chart(line_fig(ops, "date", "num_vehicles",
                                   "Vehicles Served / Day", "count", ma=1),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_019")
     with c6:
         st.plotly_chart(line_fig(ops, "date", "purif_running_hrs",
                                   "Purification Running Hrs / Day", "hrs", ma=1),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_020")
 
 
 def tab_power(ops: pd.DataFrame, ma: int):
@@ -897,31 +896,31 @@ def tab_power(ops: pd.DataFrame, ma: int):
     with c1:
         st.plotly_chart(line_fig(ops, "date", "vpsa_kwh_total",
                                   "VPSA Power Consumed (KWH/day)", "KWH", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_021")
     with c2:
         st.plotly_chart(line_fig(ops, "date", "bg_mfm_kwh_total",
                                   "Biogas MFM Power (KWH/day)", "KWH", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_022")
 
     c3, c4 = st.columns(2)
     with c3:
         st.plotly_chart(line_fig(ops, "date", "raw_water_m3",
                                   "Raw Water Consumed (m³/day)", "m³", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_023")
     with c4:
         st.plotly_chart(line_fig(ops, "date", "poly_kg",
                                   "Poly Consumption (kg/day)", "kg", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_024")
 
     c5, c6 = st.columns(2)
     with c5:
         st.plotly_chart(line_fig(ops, "date", "dg_hrs",
                                   "DG Running Hours / Day", "hrs", ma=1),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_025")
     with c6:
         st.plotly_chart(line_fig(ops, "date", "dg_diesel_l",
                                   "DG Diesel Consumed (L/day)", "L", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_026")
 
     sec("💡 SPECIFIC ENERGY INTENSITY")
     ops2 = ops.copy()
@@ -933,7 +932,7 @@ def tab_power(ops: pd.DataFrame, ma: int):
     st.plotly_chart(line_fig(ops2, "date", "kwh_per_m3",
                               "VPSA Specific Energy (KWH / m³ purified gas)",
                               "KWH/m³", ma=ma, height=400),
-                    use_container_width=True)
+                    use_container_width=True, key="chart_027")
 
 
 def tab_digester(ops: pd.DataFrame, ma: int):
@@ -946,14 +945,14 @@ def tab_digester(ops: pd.DataFrame, ma: int):
                        annotation_text="Mesophilic 37°C",
                        annotation_font_color="#ffab40")
         fig.add_hrect(y0=35, y1=40, fillcolor="#ffab40", opacity=0.06)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="chart_028")
     with c2:
         fig = line_fig(ops, "date", "digester_ph",
                        "Digester pH (Mid)", "pH", ma=ma)
         fig.add_hrect(y0=6.8, y1=7.5, fillcolor="#69f0ae", opacity=0.08,
                        annotation_text="Optimal 6.8–7.5",
                        annotation_font_color="#69f0ae")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="chart_029")
 
     sec("💧 DEWATERING & SCREW PRESS")
     c3, c4 = st.columns(2)
@@ -962,11 +961,11 @@ def tab_digester(ops: pd.DataFrame, ma: int):
                                        "screw_moisture", "Screw Press",
                                        "volute_moisture", "Volute Press",
                                        "Dewatering Moisture (%)"),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_030")
     with c4:
         st.plotly_chart(line_fig(ops, "date", "flare_m3",
                                   "Flare Gas (m³/day)", "m³", ma=ma),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_031")
 
     c5, c6, c7 = st.columns(3)
     for col_w, col, title in zip(
@@ -977,7 +976,7 @@ def tab_digester(ops: pd.DataFrame, ma: int):
         with col_w:
             st.plotly_chart(line_fig(ops, "date", col, title, "hrs",
                                       ma=1, height=380),
-                            use_container_width=True)
+                            use_container_width=True, key="chart_032")
 
 
 def tab_lab(all_data: dict, selected: list, date_filter: dict):
@@ -1035,7 +1034,7 @@ def tab_lab(all_data: dict, selected: list, date_filter: dict):
             fig.update_xaxes(showgrid=True, gridcolor=CHART_GRID)
             fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID)
             with col_w:
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="chart_033")
 
     sec("📊 TS vs VS CORRELATION")
     valid = lab_f.dropna(subset=["TS_pct", "VS_pct"])
@@ -1043,7 +1042,7 @@ def tab_lab(all_data: dict, selected: list, date_filter: dict):
         st.plotly_chart(scatter_fig(valid, "TS_pct", "VS_pct",
                                      "TS (%) vs VS (%) — by Sample Point",
                                      height=460),
-                        use_container_width=True)
+                        use_container_width=True, key="chart_034")
 
 
 def tab_compare(all_data: dict, selected: list, date_filter: dict):
@@ -1086,6 +1085,7 @@ def tab_compare(all_data: dict, selected: list, date_filter: dict):
             st.plotly_chart(
                 bar_fig(monthly, "month", col, title, color="plant", height=400),
                 use_container_width=True,
+                key=f"chart_compare_{col}",
             )
 
     sec("🕸️ PLANT PROFILE RADAR (PERIOD AVERAGES)")
@@ -1118,7 +1118,7 @@ def tab_compare(all_data: dict, selected: list, date_filter: dict):
             legend=dict(bgcolor="rgba(7,17,31,0.8)", bordercolor="#1a2d4a",
                         borderwidth=1),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="chart_035")
 
 
 def tab_dung_routes(all_data: dict, selected: list, date_filter: dict):
@@ -1173,7 +1173,7 @@ def tab_dung_routes(all_data: dict, selected: list, date_filter: dict):
             fig.update_xaxes(showgrid=False)
             fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID)
             with col_w:
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="chart_036")
 
 
 def tab_fertilizer(all_data: dict, selected: list):
@@ -1220,7 +1220,7 @@ def tab_fertilizer(all_data: dict, selected: list):
     )
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="chart_037")
 
     with st.expander("📋 Raw fertilizer data"):
         st.dataframe(fert, use_container_width=True)
