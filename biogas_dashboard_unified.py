@@ -2,8 +2,8 @@
 Biogas Plant Analytics Dashboard  ·  Universal Format  ·  Streamlit
 =====================================================================
 Reads any number of plants from the Unified Daily Report Excel format.
-Columns are located by NAME (dynamic scan of header row 1), so extra
-or reordered columns in any plant's file are handled automatically.
+Columns are located by NAME (dynamic scan), so extra or reordered
+columns in any plant file are handled automatically.
 
 Sheets expected
   • Daily Operations
@@ -15,7 +15,8 @@ Usage
   streamlit run biogas_dashboard.py
 """
 
-import io, warnings
+import io
+import warnings
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -51,38 +52,36 @@ PALETTE = px.colors.qualitative.Bold
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SEMANTIC COLUMN DEFINITIONS
-# Maps internal key → list of header-row strings to search for (first match wins)
+# Maps internal key → substrings to search in header row (first match wins).
+# Special keys starting with __ are handled by dedicated multi-occurrence logic.
 # ─────────────────────────────────────────────────────────────────────────────
 SEEK = {
     "date":                ["date"],
-    "dung_tons":           ["dung", "dung (tons)"],
+    "dung_tons":           ["dung (tons)", "dung\n(tons)", "dung"],
     "waste_potato_tons":   ["waste potato"],
     "total_feed_m3":       ["total feed to reactor"],
     "total_filter_water":  ["total filter water consumed"],
-    "raw_ch4":             ["ch₄", "ch4"],          # first occurrence = raw
+    # raw analyser = first occurrence of these
+    "raw_ch4":             ["ch₄", "ch4"],
     "raw_co2":             ["co₂", "co2"],
     "raw_o2":              ["o₂", "o2"],
     "raw_h2s":             ["h₂s", "h2s"],
-    "raw_bal":             ["bal"],
+    "raw_bal":             ["bal (%)"],
     "total_generated_gas": ["total generated gas"],
     "total_raw_gas":       ["total raw gas"],
     "gen_inlet_diff":      ["gen-inlet"],
     "total_purified_gas":  ["total purified gas"],
     "expected_gas_kg":     ["expected gas"],
     "cbg_mass_fm_kg":      ["cbg mass fm"],
-    # pure analyser columns – located as the SECOND occurrence of ch4/co2/h2s
-    "pure_ch4":            ["__pure_ch4__"],
-    "pure_co2":            ["__pure_co2__"],
-    "pure_h2s":            ["__pure_h2s__"],
+    # pure analyser = second occurrence — handled in _build_col_index
     "pure_gas_purity_fm":  ["pure gas purity in fm", "pure gas purity"],
     "cbg_sales_kg":        ["total cbg sales dispenser", "total cbg sales"],
     "num_vehicles":        ["no. of vehicles", "no of vehicles"],
     "cascade_sales_kg":    ["cascade vehicle sales"],
-    "purif_efficiency":    ["purification efficiency"],
+    "purif_efficiency":    ["purification efficiency (%)"],
     "purif_running_hrs":   ["purification running hrs"],
     "compressor_hrs":      ["compressor running hrs"],
-    "vpsa_kwh_total":      ["__vpsa_kwh_total__"],   # 3rd in "total kwh consumed" group
-    "bg_mfm_kwh_total":    ["__bgmfm_kwh_total__"],  # 4th occurrence
+    # vpsa/bgmfm kwh totals = handled by multi-occurrence logic
     "screw_press_hrs":     ["screw press running hrs"],
     "vibro_screen_hrs":    ["vibro screen running hrs"],
     "volute_press_hrs":    ["volute press running hrs"],
@@ -95,75 +94,82 @@ SEEK = {
     "poly_kg":             ["poly consumption"],
     "dg_hrs":              ["dg running hrs"],
     "dg_diesel_l":         ["dg diesel consumed"],
-    "hp_comp_kwh_init":    ["__hp_kwh_init__"],
-    "hp_comp_kwh_final":   ["__hp_kwh_final__"],
     "purif_eff_calc":      ["purif. eff."],
     "bg_recovery":         ["bg recovery"],
     "remarks":             ["remarks"],
 }
 
+# Keys that need the SECOND occurrence of a shared substring
+_SECOND_OCCURRENCE = {
+    "pure_ch4": ["ch₄", "ch4"],
+    "pure_co2": ["co₂", "co2"],
+    "pure_h2s": ["h₂s", "h2s"],
+}
 
-def _build_col_index(raw: pd.DataFrame) -> dict[str, int]:
+
+def _build_col_index(raw: pd.DataFrame) -> dict:
     """
-    Scan header row 1 (column names) of a Daily Operations sheet
-    and return {semantic_key: column_index}.
-    Handles repeated column names (ch4 appears twice: raw then pure).
+    Dynamically scan header row (row 1) of a Daily Operations sheet.
+    Returns {semantic_key: column_index}.
+    Handles repeated column names (ch4/co2/h2s appear twice: raw then pure).
     """
-    # row 0 = section, row 1 = column name
-    header = [str(v).replace("\n", " ").strip().lower()
-              if pd.notna(v) else "" for v in raw.iloc[1]]
+    # Normalise header row
+    header = [
+        str(v).replace("\n", " ").strip().lower() if pd.notna(v) else ""
+        for v in raw.iloc[1]
+    ]
+    section = [
+        str(v).replace("\n", " ").strip().lower() if pd.notna(v) else ""
+        for v in raw.iloc[0]
+    ]
 
-    idx: dict[str, int] = {}
+    idx: dict = {}
 
-    # ── Single-occurrence columns ────────────────────────────────────────────
-    simple_keys = [k for k in SEEK if not k.startswith("pure_ch4") and
-                   not k.startswith("pure_co2") and
-                   not k.startswith("pure_h2s") and
-                   not k.startswith("__")]
-
-    for key in simple_keys:
-        for needle in SEEK[key]:
-            needle_l = needle.lower()
+    # ── Simple single-occurrence columns ────────────────────────────────────
+    skip_keys = set(_SECOND_OCCURRENCE.keys()) | {
+        "vpsa_kwh_total", "bg_mfm_kwh_total",
+        "hp_comp_kwh_init", "hp_comp_kwh_final",
+    }
+    for key, needles in SEEK.items():
+        if key in skip_keys:
+            continue
+        for needle in needles:
+            nl = needle.lower()
             for c, h in enumerate(header):
-                if needle_l in h:
+                if nl in h:
                     idx[key] = c
                     break
             if key in idx:
                 break
 
     # ── Second-occurrence columns (raw → pure) ───────────────────────────────
-    # ch4, co2, h2s, bal, o2 each appear twice: first = raw analyser, second = pure analyser
-    for raw_key, pure_key, needle in [
-        ("raw_ch4", "pure_ch4", "ch"),
-        ("raw_co2", "pure_co2", "co"),
-        ("raw_h2s", "pure_h2s", "h₂s"),
-    ]:
-        matches = [c for c, h in enumerate(header) if needle in h]
-        if len(matches) >= 1 and raw_key not in idx:
-            idx[raw_key] = matches[0]
-        if len(matches) >= 2:
-            idx[pure_key] = matches[1]
+    for pure_key, needles in _SECOND_OCCURRENCE.items():
+        raw_key = pure_key.replace("pure_", "raw_")
+        for needle in needles:
+            nl = needle.lower()
+            matches = [c for c, h in enumerate(header) if nl in h]
+            if len(matches) >= 1 and raw_key not in idx:
+                idx[raw_key] = matches[0]
+            if len(matches) >= 2:
+                idx[pure_key] = matches[1]
+            if raw_key in idx and pure_key in idx:
+                break
 
     # ── "Total KWH Consumed" appears multiple times ──────────────────────────
-    kwh_total_cols = [c for c, h in enumerate(header) if "total kwh consumed" in h]
-    # order: VPSA MFM = first, BIOGAS MFM = second
-    if len(kwh_total_cols) >= 1:
-        idx["vpsa_kwh_total"] = kwh_total_cols[0]
-    if len(kwh_total_cols) >= 2:
-        idx["bg_mfm_kwh_total"] = kwh_total_cols[1]
+    kwh_cols = [c for c, h in enumerate(header) if "total kwh consumed" in h]
+    if len(kwh_cols) >= 1:
+        idx["vpsa_kwh_total"] = kwh_cols[0]
+    if len(kwh_cols) >= 2:
+        idx["bg_mfm_kwh_total"] = kwh_cols[1]
 
-    # ── HP compressor: "initial kwh" / "final kwh" in HP COMPRESSOR section ─
-    section = [str(v).replace("\n", " ").strip().lower()
-               if pd.notna(v) else "" for v in raw.iloc[0]]
+    # ── HP Compressor KWH ────────────────────────────────────────────────────
     hp_cols = [c for c, s in enumerate(section) if "hp compressor" in s]
-    if hp_cols:
-        # find initial/final kwh within those columns
-        for c in hp_cols:
-            h = header[c]
-            if "initial" in h or h == "initial kwh":
-                idx["hp_comp_kwh_init"] = c
-            if "final" in h or h == "final kwh":
-                idx["hp_comp_kwh_final"] = c
+    for c in hp_cols:
+        h = header[c]
+        if "initial" in h:
+            idx["hp_comp_kwh_init"] = c
+        elif "final" in h:
+            idx["hp_comp_kwh_final"] = c
 
     return idx
 
@@ -176,26 +182,31 @@ def _to_num(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 
-def load_daily_operations(wb_bytes, plant_name: str) -> pd.DataFrame:
-    raw = pd.read_excel(wb_bytes, sheet_name="Daily Operations", header=None)
+def load_daily_operations(wb_bytes: bytes, plant_name: str) -> pd.DataFrame:
+    raw = pd.read_excel(io.BytesIO(wb_bytes),
+                        sheet_name="Daily Operations", header=None)
 
-    # Find where data starts: first row after header rows where col-0 looks like a date
+    # Auto-detect data start row (first row where col-0 parses as a date)
     data_start = 3
     for r in range(2, min(10, len(raw))):
-        val = raw.iloc[r, 0]
-        if pd.notna(val):
-            try:
-                pd.Timestamp(val)
+        try:
+            v = raw.iloc[r, 0]
+            if pd.notna(v):
+                pd.Timestamp(v)
                 data_start = r
                 break
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     col_idx = _build_col_index(raw)
     data = raw.iloc[data_start:].reset_index(drop=True)
 
     records = {}
-    for key in SEEK:
+    all_keys = list(SEEK.keys()) + list(_SECOND_OCCURRENCE.keys()) + [
+        "vpsa_kwh_total", "bg_mfm_kwh_total",
+        "hp_comp_kwh_init", "hp_comp_kwh_final",
+    ]
+    for key in all_keys:
         c = col_idx.get(key)
         if c is not None and c < data.shape[1]:
             records[key] = data.iloc[:, c].values
@@ -203,44 +214,42 @@ def load_daily_operations(wb_bytes, plant_name: str) -> pd.DataFrame:
             records[key] = np.full(len(data), np.nan, dtype=object)
 
     df = pd.DataFrame(records)
-
-    # Date
     df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
     df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
 
-    # Numeric coercion
     for col in df.columns:
         if col not in ("date", "remarks"):
             df[col] = _to_num(df[col])
 
-    # Convenience
-    df["total_sales_kg"] = df["cbg_sales_kg"].fillna(0) + df["cascade_sales_kg"].fillna(0)
+    df["total_sales_kg"] = (df["cbg_sales_kg"].fillna(0) +
+                             df["cascade_sales_kg"].fillna(0))
     df["plant"] = plant_name
     return df
 
 
-def load_lab_analysis(wb_bytes, plant_name: str) -> pd.DataFrame:
-    raw = pd.read_excel(wb_bytes, sheet_name="Lab & Slurry Analysis", header=None)
-    # Header is always row 2; data starts row 3
+def load_lab_analysis(wb_bytes: bytes, plant_name: str) -> pd.DataFrame:
+    raw = pd.read_excel(io.BytesIO(wb_bytes),
+                        sheet_name="Lab & Slurry Analysis", header=None)
+    # Row 2 is always the column-header row; data starts row 3
     data = raw.iloc[3:].reset_index(drop=True).copy()
     data.columns = range(data.shape[1])
 
-    rename = {0: "date", 1: "sample_point", 2: "pH", 3: "EC_mScm",
-               4: "TS_pct", 5: "VS_pct", 6: "Temp_C", 7: "Carbon_pct"}
-    data.rename(columns=rename, inplace=True)
+    data.rename(columns={0: "date", 1: "sample_point", 2: "pH",
+                          3: "EC_mScm", 4: "TS_pct", 5: "VS_pct",
+                          6: "Temp_C", 7: "Carbon_pct"}, inplace=True)
 
     data["date"] = data["date"].ffill()
     data["date"] = pd.to_datetime(data["date"], dayfirst=True, errors="coerce")
     data = data.dropna(subset=["date", "sample_point"])
     data["sample_point"] = data["sample_point"].astype(str).str.strip()
-    # Remove template row noise
-    data = data[~data["sample_point"].str.lower().str.contains("sample point|notes", na=False)]
+    data = data[~data["sample_point"].str.lower().str.contains(
+        "sample point|notes|nan", na=False)]
 
     for col in ["pH", "EC_mScm", "TS_pct", "VS_pct", "Temp_C", "Carbon_pct"]:
         if col in data.columns:
             data[col] = _to_num(data[col])
 
-    # Validation
+    # Drop physiologically impossible values
     for col, lo, hi in [("TS_pct", 0, 100), ("VS_pct", 0, 100), ("pH", 0, 14)]:
         if col in data.columns:
             data = data[~(data[col].notna() & ~data[col].between(lo, hi))]
@@ -250,8 +259,9 @@ def load_lab_analysis(wb_bytes, plant_name: str) -> pd.DataFrame:
                  "TS_pct", "VS_pct", "Temp_C", "Carbon_pct"]].reset_index(drop=True)
 
 
-def load_dung_quality(wb_bytes, plant_name: str) -> pd.DataFrame:
-    raw = pd.read_excel(wb_bytes, sheet_name="Dung Route Quality", header=None)
+def load_dung_quality(wb_bytes: bytes, plant_name: str) -> pd.DataFrame:
+    raw = pd.read_excel(io.BytesIO(wb_bytes),
+                        sheet_name="Dung Route Quality", header=None)
     route_row  = raw.iloc[0]
     subcol_row = raw.iloc[1]
     data       = raw.iloc[3:].reset_index(drop=True)
@@ -266,7 +276,8 @@ def load_dung_quality(wb_bytes, plant_name: str) -> pd.DataFrame:
         for k in range(4):
             ci = c + k
             sub_names.append(
-                str(subcol_row.iloc[ci]).strip() if ci < len(subcol_row) and pd.notna(subcol_row.iloc[ci])
+                str(subcol_row.iloc[ci]).strip()
+                if ci < len(subcol_row) and pd.notna(subcol_row.iloc[ci])
                 else f"sub{k}"
             )
         for _, row in data.iterrows():
@@ -279,49 +290,77 @@ def load_dung_quality(wb_bytes, plant_name: str) -> pd.DataFrame:
                 rec[sname] = pd.to_numeric(v, errors="coerce")
             records.append(rec)
 
-    return pd.DataFrame(records).sort_values("date").reset_index(drop=True) if records else pd.DataFrame()
+    return (pd.DataFrame(records).sort_values("date").reset_index(drop=True)
+            if records else pd.DataFrame())
 
 
-def load_fertilizer_quality(wb_bytes, plant_name: str) -> pd.DataFrame:
-    raw = pd.read_excel(wb_bytes, sheet_name="Fertilizer Quality", header=None)
-    headers = [str(h).replace("\n", " ").strip() for h in raw.iloc[1]]
-    data = raw.iloc[2:].reset_index(drop=True).copy()
+def load_fertilizer_quality(wb_bytes: bytes, plant_name: str) -> pd.DataFrame:
+    raw = pd.read_excel(io.BytesIO(wb_bytes),
+                        sheet_name="Fertilizer Quality", header=None)
+
+    # Dynamically find the header row: first row where col-0 looks like "Sr" / "Sr. No."
+    header_row_idx = 2  # default
+    for r in range(min(5, len(raw))):
+        v = str(raw.iloc[r, 0]).replace("\n", " ").strip().lower()
+        if v.startswith("sr"):
+            header_row_idx = r
+            break
+
+    headers = [str(h).replace("\n", " ").strip()
+               for h in raw.iloc[header_row_idx]]
+    data = raw.iloc[header_row_idx + 1:].reset_index(drop=True).copy()
     data.columns = headers
+
+    # Drop section-banner rows (where the first column is not numeric)
     sr_col = headers[0]
     data = data[pd.to_numeric(data[sr_col], errors="coerce").notna()].copy()
+
+    # Coerce numeric columns
+    non_numeric = {"Sr. No.", "Sr.\nNo.", sr_col,
+                   "Sample Date", "Sample\nDate",
+                   "Material Name", "Material\nName",
+                   "Batch / Type", "Batch /\nType",
+                   "Mfg Date / Month", "Mfg Date\n/ Month",
+                   "Remarks / Sampler", "Remarks /\nSampler"}
     for col in data.columns:
-        data[col] = _to_num(data[col]) if data[col].dtype == object else data[col]
+        if col not in non_numeric and data[col].dtype == object:
+            data[col] = _to_num(data[col])
+
     data["plant"] = plant_name
     return data.reset_index(drop=True)
 
 
 @st.cache_data(show_spinner=False)
 def load_plant(file_bytes: bytes, plant_name: str) -> dict:
+    """Load all sheets for one plant file. Cached by file content hash."""
     def _safe(fn, label):
         try:
-            return fn(io.BytesIO(file_bytes), plant_name)
+            return fn(file_bytes, plant_name)
         except Exception as e:
             st.warning(f"⚠️ [{plant_name}] {label}: {e}")
             return pd.DataFrame()
+
     return {
-        "ops":  _safe(load_daily_operations, "Daily Operations"),
-        "lab":  _safe(load_lab_analysis,     "Lab & Slurry Analysis"),
-        "dung": _safe(load_dung_quality,     "Dung Route Quality"),
-        "fert": _safe(load_fertilizer_quality,"Fertilizer Quality"),
+        "ops":  _safe(load_daily_operations,  "Daily Operations"),
+        "lab":  _safe(load_lab_analysis,      "Lab & Slurry Analysis"),
+        "dung": _safe(load_dung_quality,      "Dung Route Quality"),
+        "fert": _safe(load_fertilizer_quality, "Fertilizer Quality"),
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HELPERS
+# CHART HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _pmap(plants) -> dict:
     return {p: PALETTE[i % len(PALETTE)] for i, p in enumerate(sorted(plants))}
 
+
 def _ma(s: pd.Series, w: int) -> pd.Series:
     return s.rolling(w, min_periods=1).mean()
 
-def _base_layout(fig, height=380):
+
+def _base(fig, height=380):
     fig.update_layout(
         paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
         font=dict(color="#e0e0e0"),
@@ -332,36 +371,53 @@ def _base_layout(fig, height=380):
     fig.update_yaxes(showgrid=True, gridcolor="#1e3a5f")
     return fig
 
-def line_fig(df, x, ycols, title, ylab="", color_col="plant", ma=7):
-    """Multi-series line chart; ycols can be str or list."""
-    if isinstance(ycols, str):
-        ycols = [ycols]
-    fig = go.Figure()
-    cmap = _pmap(df[color_col].unique()) if color_col in df.columns else {}
-    groups = df.groupby(color_col) if color_col in df.columns else [("", df)]
-    color_i = 0
-    for grp, gdf in groups:
-        base_c = cmap.get(grp, PALETTE[color_i % len(PALETTE)])
-        for yi, col in enumerate(ycols):
-            if col not in gdf.columns or gdf[col].dropna().empty:
-                continue
-            label = f"{grp} – {col}" if len(ycols) > 1 else str(grp)
-            shade = base_c
-            fig.add_trace(go.Scatter(
-                x=gdf[x], y=gdf[col], mode="lines", name=label,
-                line=dict(color=shade, width=1.6), opacity=0.85,
-            ))
-            if ma > 1:
-                fig.add_trace(go.Scatter(
-                    x=gdf[x], y=_ma(gdf[col], ma), mode="lines",
-                    name=f"{label} {ma}d MA",
-                    line=dict(color=shade, width=2.5, dash="dash"), showlegend=False,
-                ))
-        color_i += 1
-    fig.update_layout(title=title, yaxis_title=ylab)
-    return _base_layout(fig)
 
-def bar_fig(df, x, y, title, color="plant", barmode="group"):
+def line_fig(df: pd.DataFrame, x: str, ycol: str,
+             title: str, ylab: str = "", ma: int = 7) -> go.Figure:
+    """Single-metric multi-plant line chart."""
+    fig = go.Figure()
+    if df.empty or ycol not in df.columns:
+        return _base(fig)
+    cmap = _pmap(df["plant"].unique())
+    for p, gdf in df.groupby("plant"):
+        c = cmap[p]
+        s = gdf[ycol]
+        fig.add_trace(go.Scatter(x=gdf[x], y=s, mode="lines", name=p,
+                                  line=dict(color=c, width=1.6), opacity=0.85))
+        if ma > 1 and s.notna().sum() >= ma:
+            fig.add_trace(go.Scatter(
+                x=gdf[x], y=_ma(s, ma), mode="lines",
+                name=f"{p} {ma}d MA",
+                line=dict(color=c, width=2.5, dash="dash"), showlegend=False))
+    fig.update_layout(title=title, yaxis_title=ylab)
+    return _base(fig)
+
+
+def dual_line_fig(df: pd.DataFrame, x: str,
+                  col_a: str, label_a: str,
+                  col_b: str, label_b: str,
+                  title: str) -> go.Figure:
+    """Two metrics per plant (solid / dotted)."""
+    fig = go.Figure()
+    if df.empty:
+        return _base(fig)
+    cmap = _pmap(df["plant"].unique())
+    for p, gdf in df.groupby("plant"):
+        c = cmap[p]
+        if col_a in gdf.columns:
+            fig.add_trace(go.Scatter(x=gdf[x], y=gdf[col_a],
+                                      name=f"{p} – {label_a}",
+                                      line=dict(color=c, width=1.6)))
+        if col_b in gdf.columns:
+            fig.add_trace(go.Scatter(x=gdf[x], y=gdf[col_b],
+                                      name=f"{p} – {label_b}",
+                                      line=dict(color=c, width=1.6, dash="dot")))
+    fig.update_layout(title=title)
+    return _base(fig)
+
+
+def bar_fig(df: pd.DataFrame, x: str, y: str, title: str,
+            color: str = "plant", barmode: str = "group") -> go.Figure:
     cmap = _pmap(df["plant"].unique()) if "plant" in df.columns else {}
     fig = px.bar(df, x=x, y=y, color=color, barmode=barmode,
                  title=title, color_discrete_map=cmap, template="plotly_dark")
@@ -369,7 +425,9 @@ def bar_fig(df, x, y, title, color="plant", barmode="group"):
                       font=dict(color="#e0e0e0"), height=380, title_x=0)
     return fig
 
-def scatter_fig(df, x, y, title, color="sample_point"):
+
+def scatter_fig(df: pd.DataFrame, x: str, y: str, title: str,
+                color: str = "sample_point") -> go.Figure:
     cmap = _pmap(df[color].unique()) if color in df.columns else {}
     fig = px.scatter(df, x=x, y=y, color=color, trendline="ols",
                      title=title, color_discrete_map=cmap, template="plotly_dark")
@@ -377,23 +435,28 @@ def scatter_fig(df, x, y, title, color="sample_point"):
                       font=dict(color="#e0e0e0"), height=400, title_x=0)
     return fig
 
+
 def sec(text: str):
     st.markdown(f'<div class="sec-hdr">{text}</div>', unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
+# FIX: st.slider uses key="ma_window" — NEVER manually assign session_state
+#      for a widget-managed key. Just read it with .get() after the slider.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def sidebar() -> tuple[dict, list[str], dict]:
+def sidebar() -> tuple:
+    """Returns (all_data, selected_plants, date_filter)."""
     with st.sidebar:
         st.markdown("## ⚡ Biogas Dashboard")
         st.markdown("---")
 
         uploaded = st.file_uploader(
             "📂 Upload plant Excel file(s)",
-            type=["xlsx"], accept_multiple_files=True,
-            help="One file per plant – Unified Daily Report format.",
+            type=["xlsx"],
+            accept_multiple_files=True,
+            help="One file per plant — Unified Daily Report format.",
         )
 
         all_data: dict = {}
@@ -401,13 +464,16 @@ def sidebar() -> tuple[dict, list[str], dict]:
             for f in uploaded:
                 raw_bytes = f.read()
                 default = f.name.replace(".xlsx", "").replace("_", " ").title()
-                pname = st.text_input(f"Name for '{f.name}'", value=default,
-                                      key=f"pname_{f.name}")
+                pname = st.text_input(
+                    f"Name for '{f.name}'",
+                    value=default,
+                    key=f"pname_{f.name}",
+                )
                 with st.spinner(f"Loading {pname}…"):
                     all_data[pname] = load_plant(raw_bytes, pname)
 
         if not all_data:
-            st.info("Upload one or more Excel files to begin.")
+            st.info("Upload one or more plant Excel files to begin.")
             return {}, [], {}
 
         st.markdown("---")
@@ -424,7 +490,8 @@ def sidebar() -> tuple[dict, list[str], dict]:
             mn = combined["date"].min().date()
             mx = combined["date"].max().date()
             st.markdown("### 📅 Date Range")
-            dr = st.date_input("Filter", value=(mn, mx), min_value=mn, max_value=mx)
+            dr = st.date_input("Filter", value=(mn, mx),
+                                min_value=mn, max_value=mx)
             date_filter = {
                 "start": pd.Timestamp(dr[0]),
                 "end":   pd.Timestamp(dr[1] if len(dr) > 1 else dr[0]),
@@ -432,21 +499,17 @@ def sidebar() -> tuple[dict, list[str], dict]:
 
         st.markdown("---")
         st.markdown("### ⚙️ Options")
-        # NOTE: do NOT manually assign session_state for a widget-managed key.
-        # Just declare the slider; read via st.session_state["ma_window"] elsewhere.
+        # ✅ CORRECT: declare the slider with key — do NOT write to session_state manually
         st.slider("Moving average (days)", 1, 30, 7, key="ma_window")
 
         return all_data, selected, date_filter
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FILTER HELPERS
+# DATA FILTERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def ops_filtered(all_data, selected, df) -> pd.DataFrame:
-    return df  # already filtered by caller
-
-def get_ops(all_data, selected, date_filter) -> pd.DataFrame:
+def get_ops(all_data: dict, selected: list, date_filter: dict) -> pd.DataFrame:
     frames = []
     for p in selected:
         df = all_data[p]["ops"]
@@ -458,7 +521,8 @@ def get_ops(all_data, selected, date_filter) -> pd.DataFrame:
         frames.append(df)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
-def get_lab(all_data, selected, date_filter) -> pd.DataFrame:
+
+def get_lab(all_data: dict, selected: list, date_filter: dict) -> pd.DataFrame:
     frames = []
     for p in selected:
         df = all_data[p]["lab"]
@@ -506,80 +570,65 @@ def render_kpis(ops: pd.DataFrame):
 # TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def tab_gas(ops, ma):
+def tab_gas(ops: pd.DataFrame, ma: int):
     sec("📊 Gas Production & Quality")
     c1, c2 = st.columns(2)
     with c1:
         st.plotly_chart(line_fig(ops, "date", "total_generated_gas",
-                                 "Raw Biogas Generated (m³/day)", "m³/day", ma=ma),
+                                  "Raw Biogas Generated (m³/day)", "m³/day", ma=ma),
                         use_container_width=True)
     with c2:
         st.plotly_chart(line_fig(ops, "date", "total_purified_gas",
-                                 "Purified Gas (m³/day)", "m³/day", ma=ma),
+                                  "Purified Gas (m³/day)", "m³/day", ma=ma),
                         use_container_width=True)
 
     c3, c4 = st.columns(2)
     with c3:
-        fig = go.Figure()
-        cmap = _pmap(ops["plant"].unique())
-        for p, gdf in ops.groupby("plant"):
-            c = cmap[p]
-            for col, dash, label in [("raw_ch4", "solid", "CH₄"),
-                                      ("raw_co2", "dot",   "CO₂")]:
-                if col in gdf.columns:
-                    fig.add_trace(go.Scatter(x=gdf["date"], y=gdf[col],
-                                              name=f"{p} – {label}",
-                                              line=dict(color=c, width=1.5, dash=dash)))
-        fig.update_layout(title="Raw Biogas Composition (%)")
-        st.plotly_chart(_base_layout(fig), use_container_width=True)
-
+        st.plotly_chart(dual_line_fig(ops, "date",
+                                       "raw_ch4", "CH₄", "raw_co2", "CO₂",
+                                       "Raw Biogas Composition (%)"),
+                        use_container_width=True)
     with c4:
-        fig = go.Figure()
-        cmap = _pmap(ops["plant"].unique())
-        for p, gdf in ops.groupby("plant"):
-            c = cmap[p]
-            for col, dash, label in [("pure_ch4", "solid", "CH₄"),
-                                      ("pure_co2", "dot",   "CO₂")]:
-                if col in gdf.columns:
-                    fig.add_trace(go.Scatter(x=gdf["date"], y=gdf[col],
-                                              name=f"{p} – {label}",
-                                              line=dict(color=c, width=1.5, dash=dash)))
-        fig.update_layout(title="Purified Gas Composition (%)")
-        st.plotly_chart(_base_layout(fig), use_container_width=True)
+        st.plotly_chart(dual_line_fig(ops, "date",
+                                       "pure_ch4", "CH₄", "pure_co2", "CO₂",
+                                       "Purified Gas Composition (%)"),
+                        use_container_width=True)
 
     sec("⚠️ H₂S Levels (PPM)")
     c5, c6 = st.columns(2)
     with c5:
         st.plotly_chart(line_fig(ops, "date", "raw_h2s",
-                                 "Raw Gas H₂S (PPM)", "PPM", ma=ma),
+                                  "Raw Gas H₂S (PPM)", "PPM", ma=ma),
                         use_container_width=True)
     with c6:
         st.plotly_chart(line_fig(ops, "date", "pure_h2s",
-                                 "Purified Gas H₂S (PPM)", "PPM", ma=ma),
+                                  "Purified Gas H₂S (PPM)", "PPM", ma=ma),
                         use_container_width=True)
 
 
-def tab_feed(ops, ma):
+def tab_feed(ops: pd.DataFrame, ma: int):
     sec("🐄 Feedstock & Feeding")
     c1, c2 = st.columns(2)
     with c1:
         st.plotly_chart(line_fig(ops, "date", "dung_tons",
-                                 "Dung Collected (tons/day)", "tons", ma=ma),
+                                  "Dung Collected (tons/day)", "tons", ma=ma),
                         use_container_width=True)
     with c2:
         st.plotly_chart(line_fig(ops, "date", "total_feed_m3",
-                                 "Total Feed to Reactor (m³/day)", "m³", ma=ma),
+                                  "Total Feed to Reactor (m³/day)", "m³", ma=ma),
                         use_container_width=True)
 
     c3, c4 = st.columns(2)
     with c3:
         st.plotly_chart(line_fig(ops, "date", "total_filter_water",
-                                 "Filter Water Consumed (m³/day)", "m³", ma=ma),
+                                  "Filter Water Consumed (m³/day)", "m³", ma=ma),
                         use_container_width=True)
     with c4:
-        if ops.get("waste_potato_tons", pd.Series()).notna().any() if isinstance(ops, pd.DataFrame) and "waste_potato_tons" in ops else False:
+        has_potato = ("waste_potato_tons" in ops.columns and
+                      ops["waste_potato_tons"].notna().any())
+        if has_potato:
             st.plotly_chart(line_fig(ops, "date", "waste_potato_tons",
-                                     "Waste Potato Added (tons/day)", "tons", ma=ma),
+                                      "Waste Potato Added (tons/day)", "tons", ma=ma),
                             use_container_width=True)
         else:
             st.info("No waste-potato data for selected plants.")
@@ -587,94 +636,98 @@ def tab_feed(ops, ma):
     sec("📈 Specific Biogas Yield")
     ops2 = ops.copy()
     ops2["yield_m3_per_ton"] = np.where(ops2["dung_tons"] > 0,
-                                         ops2["total_generated_gas"] / ops2["dung_tons"], np.nan)
+                                         ops2["total_generated_gas"] / ops2["dung_tons"],
+                                         np.nan)
     st.plotly_chart(line_fig(ops2, "date", "yield_m3_per_ton",
                               "Biogas Yield (m³ per ton of dung)", "m³/ton", ma=ma),
                     use_container_width=True)
 
 
-def tab_purif(ops, ma):
+def tab_purif(ops: pd.DataFrame, ma: int):
     sec("⚗️ Purification & CBG Sales")
     c1, c2 = st.columns(2)
     with c1:
         st.plotly_chart(line_fig(ops, "date", "purif_efficiency",
-                                 "Purification Efficiency (%)", "%", ma=ma),
+                                  "Purification Efficiency (%)", "%", ma=ma),
                         use_container_width=True)
     with c2:
         st.plotly_chart(line_fig(ops, "date", "bg_recovery",
-                                 "Biogas Recovery (%)", "%", ma=ma),
+                                  "Biogas Recovery (%)", "%", ma=ma),
                         use_container_width=True)
 
     c3, c4 = st.columns(2)
     with c3:
         st.plotly_chart(line_fig(ops, "date", "cbg_sales_kg",
-                                 "CBG Sales – Dispenser (kg/day)", "kg", ma=ma),
+                                  "CBG Sales – Dispenser (kg/day)", "kg", ma=ma),
                         use_container_width=True)
     with c4:
         st.plotly_chart(line_fig(ops, "date", "total_sales_kg",
-                                 "Total CBG Sales (kg/day)", "kg", ma=ma),
+                                  "Total CBG Sales (kg/day)", "kg", ma=ma),
                         use_container_width=True)
 
     sec("📅 Monthly CBG Sales")
     monthly = (ops.assign(month=ops["date"].dt.to_period("M").astype(str))
                   .groupby(["month", "plant"], as_index=False)["cbg_sales_kg"].sum())
-    st.plotly_chart(bar_fig(monthly, "month", "cbg_sales_kg",
-                             "Monthly CBG Sales (kg)", color="plant"),
-                    use_container_width=True)
+    if not monthly.empty:
+        st.plotly_chart(bar_fig(monthly, "month", "cbg_sales_kg",
+                                 "Monthly CBG Sales (kg)", color="plant"),
+                        use_container_width=True)
 
     c5, c6 = st.columns(2)
     with c5:
         st.plotly_chart(line_fig(ops, "date", "num_vehicles",
-                                 "Vehicles Served / Day", "count", ma=1),
+                                  "Vehicles Served / Day", "count", ma=1),
                         use_container_width=True)
     with c6:
         st.plotly_chart(line_fig(ops, "date", "purif_running_hrs",
-                                 "Purification Running Hrs / Day", "hrs", ma=1),
+                                  "Purification Running Hrs / Day", "hrs", ma=1),
                         use_container_width=True)
 
 
-def tab_power(ops, ma):
+def tab_power(ops: pd.DataFrame, ma: int):
     sec("⚡ Power & Utility Consumption")
     c1, c2 = st.columns(2)
     with c1:
         st.plotly_chart(line_fig(ops, "date", "vpsa_kwh_total",
-                                 "VPSA Power Consumed (KWH/day)", "KWH", ma=ma),
+                                  "VPSA Power Consumed (KWH/day)", "KWH", ma=ma),
                         use_container_width=True)
     with c2:
         st.plotly_chart(line_fig(ops, "date", "bg_mfm_kwh_total",
-                                 "Biogas MFM Power (KWH/day)", "KWH", ma=ma),
+                                  "Biogas MFM Power (KWH/day)", "KWH", ma=ma),
                         use_container_width=True)
 
     c3, c4 = st.columns(2)
     with c3:
         st.plotly_chart(line_fig(ops, "date", "raw_water_m3",
-                                 "Raw Water Consumed (m³/day)", "m³", ma=ma),
+                                  "Raw Water Consumed (m³/day)", "m³", ma=ma),
                         use_container_width=True)
     with c4:
         st.plotly_chart(line_fig(ops, "date", "poly_kg",
-                                 "Poly Consumption (kg/day)", "kg", ma=ma),
+                                  "Poly Consumption (kg/day)", "kg", ma=ma),
                         use_container_width=True)
 
     c5, c6 = st.columns(2)
     with c5:
         st.plotly_chart(line_fig(ops, "date", "dg_hrs",
-                                 "DG Running Hours / Day", "hrs", ma=1),
+                                  "DG Running Hours / Day", "hrs", ma=1),
                         use_container_width=True)
     with c6:
         st.plotly_chart(line_fig(ops, "date", "dg_diesel_l",
-                                 "DG Diesel Consumed (L/day)", "L", ma=ma),
+                                  "DG Diesel Consumed (L/day)", "L", ma=ma),
                         use_container_width=True)
 
     sec("💡 Specific Energy")
     ops2 = ops.copy()
     ops2["kwh_per_m3"] = np.where(ops2["total_purified_gas"] > 0,
-                                   ops2["vpsa_kwh_total"] / ops2["total_purified_gas"], np.nan)
+                                   ops2["vpsa_kwh_total"] / ops2["total_purified_gas"],
+                                   np.nan)
     st.plotly_chart(line_fig(ops2, "date", "kwh_per_m3",
-                              "VPSA Specific Energy (KWH / m³ purified gas)", "KWH/m³", ma=ma),
+                              "VPSA Specific Energy (KWH / m³ purified gas)",
+                              "KWH/m³", ma=ma),
                     use_container_width=True)
 
 
-def tab_digester(ops, ma):
+def tab_digester(ops: pd.DataFrame, ma: int):
     sec("🌡️ Digester Conditions")
     c1, c2 = st.columns(2)
     with c1:
@@ -687,39 +740,34 @@ def tab_digester(ops, ma):
         fig = line_fig(ops, "date", "digester_ph",
                        "Digester pH (Mid)", "pH", ma=ma)
         fig.add_hrect(y0=6.8, y1=7.5, fillcolor="#1b5e20", opacity=0.12,
-                       annotation_text="Optimal 6.8-7.5")
+                       annotation_text="Optimal 6.8–7.5")
         st.plotly_chart(fig, use_container_width=True)
 
     sec("💧 Dewatering & Flare")
     c3, c4 = st.columns(2)
     with c3:
-        fig = go.Figure()
-        cmap = _pmap(ops["plant"].unique())
-        for p, gdf in ops.groupby("plant"):
-            c = cmap[p]
-            for col, dash, label in [("screw_moisture",  "solid",  "Screw"),
-                                      ("volute_moisture", "dot",    "Volute")]:
-                if col in gdf.columns:
-                    fig.add_trace(go.Scatter(x=gdf["date"], y=gdf[col],
-                                              name=f"{p} – {label}",
-                                              line=dict(color=c, width=1.5, dash=dash)))
-        fig.update_layout(title="Dewatering Moisture (%)")
-        st.plotly_chart(_base_layout(fig), use_container_width=True)
+        st.plotly_chart(dual_line_fig(ops, "date",
+                                       "screw_moisture", "Screw",
+                                       "volute_moisture", "Volute",
+                                       "Dewatering Moisture (%)"),
+                        use_container_width=True)
     with c4:
         st.plotly_chart(line_fig(ops, "date", "flare_m3",
-                                 "Flare Gas (m³/day)", "m³", ma=ma),
+                                  "Flare Gas (m³/day)", "m³", ma=ma),
                         use_container_width=True)
 
     c5, c6, c7 = st.columns(3)
-    for col_w, col, title in zip([c5, c6, c7],
-                                  ["screw_press_hrs", "vibro_screen_hrs", "volute_press_hrs"],
-                                  ["Screw Press Hrs", "Vibro Screen Hrs", "Volute Press Hrs"]):
+    for col_w, col, title in zip(
+        [c5, c6, c7],
+        ["screw_press_hrs", "vibro_screen_hrs", "volute_press_hrs"],
+        ["Screw Press Hrs", "Vibro Screen Hrs", "Volute Press Hrs"],
+    ):
         with col_w:
             st.plotly_chart(line_fig(ops, "date", col, title, "hrs", ma=1),
                             use_container_width=True)
 
 
-def tab_lab(all_data, selected, date_filter):
+def tab_lab(all_data: dict, selected: list, date_filter: dict):
     sec("🔬 Lab & Slurry Analysis")
     lab = get_lab(all_data, selected, date_filter)
     if lab.empty:
@@ -727,8 +775,10 @@ def tab_lab(all_data, selected, date_filter):
         return
 
     pts = sorted(lab["sample_point"].dropna().unique())
-    defaults = [s for s in ["RCD (Raw Cattle Dung)", "Digester Mid Sampling Point",
-                              "Mixing Tank", "Slurry Tank"] if s in pts] or pts[:3]
+    defaults = ([s for s in ["RCD (Raw Cattle Dung)",
+                              "Digester Mid Sampling Point",
+                              "Mixing Tank", "Slurry Tank"]
+                 if s in pts] or pts[:3])
     chosen = st.multiselect("Sample Points", pts, default=defaults)
     if not chosen:
         st.info("Select at least one sample point.")
@@ -736,15 +786,23 @@ def tab_lab(all_data, selected, date_filter):
 
     lab_f = lab[lab["sample_point"].isin(chosen)]
 
-    for param, label in [("pH", "pH"), ("TS_pct", "TS (%)"), ("VS_pct", "VS (%)"),
-                          ("EC_mScm", "EC (mS/cm)"), ("Temp_C", "Temperature (°C)"),
-                          ("Carbon_pct", "Carbon (%)")]:
+    for param, label in [
+        ("pH",       "pH"),
+        ("TS_pct",   "TS (%)"),
+        ("VS_pct",   "VS (%)"),
+        ("EC_mScm",  "EC (mS/cm)"),
+        ("Temp_C",   "Temperature (°C)"),
+        ("Carbon_pct","Carbon (%)"),
+    ]:
         if param not in lab_f.columns or lab_f[param].dropna().empty:
             continue
         sub = lab_f.dropna(subset=[param])
-        fig = px.line(sub, x="date", y=param, color="sample_point",
-                      facet_col="plant" if len(selected) > 1 else None,
-                      title=f"{label} by Sample Point", template="plotly_dark")
+        fig = px.line(
+            sub, x="date", y=param, color="sample_point",
+            facet_col="plant" if len(selected) > 1 else None,
+            title=f"{label} by Sample Point",
+            template="plotly_dark",
+        )
         fig.update_layout(paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
                            font=dict(color="#e0e0e0"), height=360)
         st.plotly_chart(fig, use_container_width=True)
@@ -757,7 +815,7 @@ def tab_lab(all_data, selected, date_filter):
                         use_container_width=True)
 
 
-def tab_compare(all_data, selected, date_filter):
+def tab_compare(all_data: dict, selected: list, date_filter: dict):
     sec("📊 Cross-Plant Comparison")
     if len(selected) < 2:
         st.info("Select at least 2 plants from the sidebar.")
@@ -768,18 +826,20 @@ def tab_compare(all_data, selected, date_filter):
         st.warning("No operational data.")
         return
 
-    monthly = (ops.assign(month=ops["date"].dt.to_period("M").astype(str))
-                  .groupby(["month", "plant"], as_index=False)
-                  .agg(
-                      total_generated_gas=("total_generated_gas", "sum"),
-                      total_purified_gas =("total_purified_gas",  "sum"),
-                      cbg_sales_kg       =("cbg_sales_kg",        "sum"),
-                      avg_purif_eff      =("purif_efficiency",     "mean"),
-                      avg_ch4_raw        =("raw_ch4",              "mean"),
-                      avg_ch4_pure       =("pure_ch4",             "mean"),
-                      avg_digester_temp  =("digester_temp",        "mean"),
-                      dung_tons          =("dung_tons",            "sum"),
-                  ))
+    monthly = (
+        ops.assign(month=ops["date"].dt.to_period("M").astype(str))
+           .groupby(["month", "plant"], as_index=False)
+           .agg(
+               total_generated_gas=("total_generated_gas", "sum"),
+               total_purified_gas =("total_purified_gas",  "sum"),
+               cbg_sales_kg       =("cbg_sales_kg",        "sum"),
+               avg_purif_eff      =("purif_efficiency",     "mean"),
+               avg_ch4_raw        =("raw_ch4",              "mean"),
+               avg_ch4_pure       =("pure_ch4",             "mean"),
+               avg_digester_temp  =("digester_temp",        "mean"),
+               dung_tons          =("dung_tons",            "sum"),
+           )
+    )
 
     for col, title in [
         ("total_generated_gas", "Monthly Raw Biogas (m³)"),
@@ -800,17 +860,19 @@ def tab_compare(all_data, selected, date_filter):
     if not latest.empty:
         fig = go.Figure()
         for _, row in latest.iterrows():
-            vals   = [row[m] for m in radar_m] + [row[radar_m[0]]]
+            vals   = [row.get(m, 0) for m in radar_m] + [row.get(radar_m[0], 0)]
             labels = ["Purif Eff %", "CH₄ Raw %", "CH₄ Pure %", "Purif Eff %"]
-            fig.add_trace(go.Scatterpolar(r=vals, theta=labels, fill="toself",
-                                          name=row["plant"]))
-        fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                           paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
-                           font=dict(color="#e0e0e0"), height=420)
+            fig.add_trace(go.Scatterpolar(r=vals, theta=labels,
+                                          fill="toself", name=row["plant"]))
+        fig.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+            paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+            font=dict(color="#e0e0e0"), height=420,
+        )
         st.plotly_chart(fig, use_container_width=True)
 
 
-def tab_dung_routes(all_data, selected, date_filter):
+def tab_dung_routes(all_data: dict, selected: list, date_filter: dict):
     sec("🚛 Dung Route Quality")
     frames = []
     for p in selected:
@@ -848,7 +910,7 @@ def tab_dung_routes(all_data, selected, date_filter):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def tab_fertilizer(all_data, selected):
+def tab_fertilizer(all_data: dict, selected: list):
     sec("🌱 Organic Fertilizer Quality")
     frames = [all_data[p]["fert"] for p in selected
               if not all_data[p]["fert"].empty]
@@ -864,13 +926,16 @@ def tab_fertilizer(all_data, selected):
 
     param = st.selectbox("Parameter", num_cols)
     mat_col = next((c for c in fert.columns
-                    if "material" in str(c).lower() or "name" in str(c).lower()), None)
+                    if "material" in str(c).lower()), None)
 
-    fig = (px.box(fert.dropna(subset=[param]), x=mat_col, y=param, color="plant",
-                   title=f"Fertilizer {param} by Material", template="plotly_dark")
-           if mat_col else
-           px.box(fert.dropna(subset=[param]), y=param, color="plant",
-                   title=f"Fertilizer {param}", template="plotly_dark"))
+    if mat_col:
+        fig = px.box(fert.dropna(subset=[param]), x=mat_col, y=param,
+                     color="plant", title=f"Fertilizer {param} by Material",
+                     template="plotly_dark")
+    else:
+        fig = px.box(fert.dropna(subset=[param]), y=param,
+                     color="plant", title=f"Fertilizer {param}",
+                     template="plotly_dark")
     fig.update_layout(paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
                        font=dict(color="#e0e0e0"), height=420)
     st.plotly_chart(fig, use_container_width=True)
@@ -886,10 +951,11 @@ def tab_raw(ops: pd.DataFrame):
         return
 
     all_cols = [c for c in ops.columns if c != "plant"]
-    default_show = ["date", "plant", "dung_tons", "total_generated_gas",
-                    "total_purified_gas", "cbg_sales_kg", "purif_efficiency",
-                    "raw_ch4", "pure_ch4", "digester_temp"]
-    default_show = [c for c in default_show if c in ops.columns]
+    default_show = [c for c in ["date", "plant", "dung_tons",
+                                 "total_generated_gas", "total_purified_gas",
+                                 "cbg_sales_kg", "purif_efficiency",
+                                 "raw_ch4", "pure_ch4", "digester_temp"]
+                    if c in ops.columns]
     sel = st.multiselect("Columns", all_cols, default=default_show)
     show = [c for c in sel if c in ops.columns]
     if show:
@@ -899,7 +965,8 @@ def tab_raw(ops: pd.DataFrame):
     st.download_button(
         "⬇️ Download filtered data as CSV",
         ops.to_csv(index=False).encode("utf-8"),
-        "biogas_filtered_data.csv", "text/csv",
+        "biogas_filtered_data.csv",
+        "text/csv",
     )
     with st.expander("📊 Summary Statistics"):
         num_c = ops.select_dtypes(include=[np.number]).columns
@@ -922,32 +989,32 @@ def main():
 3. Filter by date range.
 4. Navigate the tabs below.
 
-**Scalable:** add any number of plant files – no plant-specific code required.
+**Scalable:** add any number of plant files — no plant-specific code required.
 Extra or reordered columns are handled automatically.
         """)
         return
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    badges = " ".join(f'<span class="plant-badge">🏭 {p}</span>' for p in selected)
-    st.markdown(f"## ⚡ Biogas Analytics &nbsp;&nbsp; {badges}", unsafe_allow_html=True)
+    # Header badges
+    badges = " ".join(
+        f'<span class="plant-badge">🏭 {p}</span>' for p in selected
+    )
+    st.markdown(f"## ⚡ Biogas Analytics &nbsp;&nbsp; {badges}",
+                unsafe_allow_html=True)
 
-    # ── Pull moving-average value (managed by the slider widget) ─────────────
+    # ✅ Read the slider value — do NOT assign to session_state
     ma = st.session_state.get("ma_window", 7)
 
-    # ── Combined ops DataFrame ────────────────────────────────────────────────
+    # Combined ops for selected plants + date range
     ops = get_ops(all_data, selected, date_filter)
 
-    # ── KPIs ──────────────────────────────────────────────────────────────────
     render_kpis(ops)
     st.markdown("---")
 
-    # ── Tabs ──────────────────────────────────────────────────────────────────
-    tab_labels = [
+    tabs = st.tabs([
         "📊 Gas Production", "🐄 Feedstock", "⚗️ Purification & Sales",
         "⚡ Power & Utilities", "🌡️ Digester & Dewatering", "🔬 Lab Analysis",
         "📊 Cross-Plant Compare", "🚛 Dung Routes", "🌱 Fertilizer", "🗄️ Raw Data",
-    ]
-    tabs = st.tabs(tab_labels)
+    ])
 
     with tabs[0]: tab_gas(ops, ma)
     with tabs[1]: tab_feed(ops, ma)
