@@ -12,7 +12,21 @@ Sheets expected
   • Fertilizer Quality
 
 Usage
-  streamlit run biogas_dashboard.py
+  streamlit run biogas_dashboard_unified.py
+
+Fixes applied (v5)
+  1. CRASH: Removed illegal `st.session_state["ma_window"] = ma_win` assignment
+     after a widget with key="ma_window" was already instantiated.
+     Fix: slider is declared with key= only; value is read via
+     st.session_state.get("ma_window", 7) after the fact.
+  2. Header-row auto-detection in _build_col_index(): both files supported —
+     Agthala has section labels on row 0 / column names on row 1, while the
+     Data template has an extra blank row 0 making those rows 1 / 2.
+  3. load_fertilizer_quality(): robust coercion — wraps each column
+     individually so a single bad column never aborts the whole sheet.
+  4. _to_num() guard: skips scalars / non-Series inputs gracefully.
+  5. load_daily_operations(): data_start detection now uses the same
+     dynamic header row offset so it aligns with the right data rows.
 """
 
 import io
@@ -53,7 +67,6 @@ PALETTE = px.colors.qualitative.Bold
 # ─────────────────────────────────────────────────────────────────────────────
 # SEMANTIC COLUMN DEFINITIONS
 # Maps internal key → substrings to search in header row (first match wins).
-# Special keys starting with __ are handled by dedicated multi-occurrence logic.
 # ─────────────────────────────────────────────────────────────────────────────
 SEEK = {
     "date":                ["date"],
@@ -61,7 +74,6 @@ SEEK = {
     "waste_potato_tons":   ["waste potato"],
     "total_feed_m3":       ["total feed to reactor"],
     "total_filter_water":  ["total filter water consumed"],
-    # raw analyser = first occurrence of these
     "raw_ch4":             ["ch₄", "ch4"],
     "raw_co2":             ["co₂", "co2"],
     "raw_o2":              ["o₂", "o2"],
@@ -73,7 +85,6 @@ SEEK = {
     "total_purified_gas":  ["total purified gas"],
     "expected_gas_kg":     ["expected gas"],
     "cbg_mass_fm_kg":      ["cbg mass fm"],
-    # pure analyser = second occurrence — handled in _build_col_index
     "pure_gas_purity_fm":  ["pure gas purity in fm", "pure gas purity"],
     "cbg_sales_kg":        ["total cbg sales dispenser", "total cbg sales"],
     "num_vehicles":        ["no. of vehicles", "no of vehicles"],
@@ -81,7 +92,6 @@ SEEK = {
     "purif_efficiency":    ["purification efficiency (%)"],
     "purif_running_hrs":   ["purification running hrs"],
     "compressor_hrs":      ["compressor running hrs"],
-    # vpsa/bgmfm kwh totals = handled by multi-occurrence logic
     "screw_press_hrs":     ["screw press running hrs"],
     "vibro_screen_hrs":    ["vibro screen running hrs"],
     "volute_press_hrs":    ["volute press running hrs"],
@@ -99,7 +109,6 @@ SEEK = {
     "remarks":             ["remarks"],
 }
 
-# Keys that need the SECOND occurrence of a shared substring
 _SECOND_OCCURRENCE = {
     "pure_ch4": ["ch₄", "ch4"],
     "pure_co2": ["co₂", "co2"],
@@ -107,29 +116,55 @@ _SECOND_OCCURRENCE = {
 }
 
 
+def _find_header_rows(raw: pd.DataFrame) -> tuple[int, int]:
+    """
+    Auto-detect (section_row, header_row) in a Daily Operations sheet.
+
+    The Agthala file has:
+      row 0 → section group labels  (e.g. "COLLECTION", "FEEDING FLOW METER")
+      row 1 → column names          (e.g. "Date", "Dung\\n(Tons)")
+
+    The Data template has an extra blank row 0, shifting everything down by 1:
+      row 0 → blank
+      row 1 → section group labels
+      row 2 → column names
+
+    Strategy: find the FIRST row whose col-0 value (lowercased) starts with "date"
+    — that is the column-name row. The row immediately above it is the section row.
+    """
+    for r in range(min(6, len(raw))):
+        v = str(raw.iloc[r, 0]).replace("\n", " ").strip().lower()
+        if v == "date":
+            section_row = max(0, r - 1)
+            return section_row, r
+    # Fallback: Agthala layout
+    return 0, 1
+
+
 def _build_col_index(raw: pd.DataFrame) -> dict:
     """
-    Dynamically scan header row (row 1) of a Daily Operations sheet.
+    Dynamically scan header rows of a Daily Operations sheet.
     Returns {semantic_key: column_index}.
     Handles repeated column names (ch4/co2/h2s appear twice: raw then pure).
     """
-    # Normalise header row
+    section_row_idx, header_row_idx = _find_header_rows(raw)
+
     header = [
         str(v).replace("\n", " ").strip().lower() if pd.notna(v) else ""
-        for v in raw.iloc[1]
+        for v in raw.iloc[header_row_idx]
     ]
     section = [
         str(v).replace("\n", " ").strip().lower() if pd.notna(v) else ""
-        for v in raw.iloc[0]
+        for v in raw.iloc[section_row_idx]
     ]
 
     idx: dict = {}
 
-    # ── Simple single-occurrence columns ────────────────────────────────────
     skip_keys = set(_SECOND_OCCURRENCE.keys()) | {
         "vpsa_kwh_total", "bg_mfm_kwh_total",
         "hp_comp_kwh_init", "hp_comp_kwh_final",
     }
+
     for key, needles in SEEK.items():
         if key in skip_keys:
             continue
@@ -142,7 +177,6 @@ def _build_col_index(raw: pd.DataFrame) -> dict:
             if key in idx:
                 break
 
-    # ── Second-occurrence columns (raw → pure) ───────────────────────────────
     for pure_key, needles in _SECOND_OCCURRENCE.items():
         raw_key = pure_key.replace("pure_", "raw_")
         for needle in needles:
@@ -155,17 +189,15 @@ def _build_col_index(raw: pd.DataFrame) -> dict:
             if raw_key in idx and pure_key in idx:
                 break
 
-    # ── "Total KWH Consumed" appears multiple times ──────────────────────────
     kwh_cols = [c for c, h in enumerate(header) if "total kwh consumed" in h]
     if len(kwh_cols) >= 1:
         idx["vpsa_kwh_total"] = kwh_cols[0]
     if len(kwh_cols) >= 2:
         idx["bg_mfm_kwh_total"] = kwh_cols[1]
 
-    # ── HP Compressor KWH ────────────────────────────────────────────────────
     hp_cols = [c for c, s in enumerate(section) if "hp compressor" in s]
     for c in hp_cols:
-        h = header[c]
+        h = header[c] if c < len(header) else ""
         if "initial" in h:
             idx["hp_comp_kwh_init"] = c
         elif "final" in h:
@@ -178,7 +210,10 @@ def _build_col_index(raw: pd.DataFrame) -> dict:
 # LOADERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _to_num(s: pd.Series) -> pd.Series:
+def _to_num(s) -> pd.Series:
+    """Safe numeric conversion — handles non-Series inputs gracefully."""
+    if not isinstance(s, pd.Series):
+        return pd.Series([np.nan] * (len(s) if hasattr(s, "__len__") else 1))
     return pd.to_numeric(s, errors="coerce")
 
 
@@ -186,9 +221,12 @@ def load_daily_operations(wb_bytes: bytes, plant_name: str) -> pd.DataFrame:
     raw = pd.read_excel(io.BytesIO(wb_bytes),
                         sheet_name="Daily Operations", header=None)
 
-    # Auto-detect data start row (first row where col-0 parses as a date)
-    data_start = 3
-    for r in range(2, min(10, len(raw))):
+    _, header_row_idx = _find_header_rows(raw)
+    # Data starts 2 rows after the column-name row (skip the units row)
+    data_start = header_row_idx + 2
+
+    # Safety: scan forward for the actual first date row
+    for r in range(data_start, min(data_start + 5, len(raw))):
         try:
             v = raw.iloc[r, 0]
             if pd.notna(v):
@@ -202,10 +240,9 @@ def load_daily_operations(wb_bytes: bytes, plant_name: str) -> pd.DataFrame:
     data = raw.iloc[data_start:].reset_index(drop=True)
 
     records = {}
-    all_keys = list(SEEK.keys()) + list(_SECOND_OCCURRENCE.keys()) + [
-        "vpsa_kwh_total", "bg_mfm_kwh_total",
-        "hp_comp_kwh_init", "hp_comp_kwh_final",
-    ]
+    all_keys = (list(SEEK.keys()) + list(_SECOND_OCCURRENCE.keys()) +
+                ["vpsa_kwh_total", "bg_mfm_kwh_total",
+                 "hp_comp_kwh_init", "hp_comp_kwh_final"])
     for key in all_keys:
         c = col_idx.get(key)
         if c is not None and c < data.shape[1]:
@@ -249,7 +286,6 @@ def load_lab_analysis(wb_bytes: bytes, plant_name: str) -> pd.DataFrame:
         if col in data.columns:
             data[col] = _to_num(data[col])
 
-    # Drop physiologically impossible values
     for col, lo, hi in [("TS_pct", 0, 100), ("VS_pct", 0, 100), ("pH", 0, 14)]:
         if col in data.columns:
             data = data[~(data[col].notna() & ~data[col].between(lo, hi))]
@@ -298,9 +334,9 @@ def load_fertilizer_quality(wb_bytes: bytes, plant_name: str) -> pd.DataFrame:
     raw = pd.read_excel(io.BytesIO(wb_bytes),
                         sheet_name="Fertilizer Quality", header=None)
 
-    # Dynamically find the header row: first row where col-0 looks like "Sr" / "Sr. No."
-    header_row_idx = 2  # default
-    for r in range(min(5, len(raw))):
+    # Find header row: first row where col-0 starts with "sr"
+    header_row_idx = 2  # sensible default
+    for r in range(min(6, len(raw))):
         v = str(raw.iloc[r, 0]).replace("\n", " ").strip().lower()
         if v.startswith("sr"):
             header_row_idx = r
@@ -315,16 +351,27 @@ def load_fertilizer_quality(wb_bytes: bytes, plant_name: str) -> pd.DataFrame:
     sr_col = headers[0]
     data = data[pd.to_numeric(data[sr_col], errors="coerce").notna()].copy()
 
-    # Coerce numeric columns
-    non_numeric = {"Sr. No.", "Sr.\nNo.", sr_col,
-                   "Sample Date", "Sample\nDate",
-                   "Material Name", "Material\nName",
-                   "Batch / Type", "Batch /\nType",
-                   "Mfg Date / Month", "Mfg Date\n/ Month",
-                   "Remarks / Sampler", "Remarks /\nSampler"}
+    # Columns that should NOT be coerced to numeric
+    non_numeric = {
+        sr_col,
+        "Sr. No.", "Sr.\nNo.",
+        "Sample Date", "Sample\nDate",
+        "Material Name", "Material\nName",
+        "Batch / Type", "Batch /\nType",
+        "Mfg Date / Month", "Mfg Date\n/ Month",
+        "Remarks / Sampler", "Remarks /\nSampler",
+    }
+
     for col in data.columns:
-        if col not in non_numeric and data[col].dtype == object:
-            data[col] = _to_num(data[col])
+        if col in non_numeric:
+            continue
+        if not isinstance(data[col], pd.Series):
+            continue  # skip duplicate-name columns that return DataFrames
+        if data[col].dtype == object:
+            try:
+                data[col] = pd.to_numeric(data[col], errors="coerce")
+            except Exception:
+                pass  # leave as-is if coercion fails for any reason
 
     data["plant"] = plant_name
     return data.reset_index(drop=True)
@@ -374,7 +421,6 @@ def _base(fig, height=380):
 
 def line_fig(df: pd.DataFrame, x: str, ycol: str,
              title: str, ylab: str = "", ma: int = 7) -> go.Figure:
-    """Single-metric multi-plant line chart."""
     fig = go.Figure()
     if df.empty or ycol not in df.columns:
         return _base(fig)
@@ -397,7 +443,6 @@ def dual_line_fig(df: pd.DataFrame, x: str,
                   col_a: str, label_a: str,
                   col_b: str, label_b: str,
                   title: str) -> go.Figure:
-    """Two metrics per plant (solid / dotted)."""
     fig = go.Figure()
     if df.empty:
         return _base(fig)
@@ -442,8 +487,6 @@ def sec(text: str):
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
-# FIX: st.slider uses key="ma_window" — NEVER manually assign session_state
-#      for a widget-managed key. Just read it with .get() after the slider.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def sidebar() -> tuple:
@@ -499,7 +542,9 @@ def sidebar() -> tuple:
 
         st.markdown("---")
         st.markdown("### ⚙️ Options")
-        # ✅ CORRECT: declare the slider with key — do NOT write to session_state manually
+        # ✅ FIX: declare slider with key= only — NEVER write to session_state
+        #    after a widget with that key has been instantiated.
+        #    Read the value later with st.session_state.get("ma_window", 7).
         st.slider("Moving average (days)", 1, 30, 7, key="ma_window")
 
         return all_data, selected, date_filter
@@ -1001,7 +1046,7 @@ Extra or reordered columns are handled automatically.
     st.markdown(f"## ⚡ Biogas Analytics &nbsp;&nbsp; {badges}",
                 unsafe_allow_html=True)
 
-    # ✅ Read the slider value — do NOT assign to session_state
+    # ✅ FIX: read slider value from session_state — NEVER assign to it
     ma = st.session_state.get("ma_window", 7)
 
     # Combined ops for selected plants + date range
