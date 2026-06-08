@@ -976,7 +976,7 @@ def tab_digester(ops: pd.DataFrame, ma: int):
         with col_w:
             st.plotly_chart(line_fig(ops, "date", col, title, "hrs",
                                       ma=1, height=380),
-                            use_container_width=True, key="chart_032")
+                            use_container_width=True, key=f"chart_digester_{col}")
 
 
 def tab_lab(all_data: dict, selected: list, date_filter: dict):
@@ -1034,7 +1034,7 @@ def tab_lab(all_data: dict, selected: list, date_filter: dict):
             fig.update_xaxes(showgrid=True, gridcolor=CHART_GRID)
             fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID)
             with col_w:
-                st.plotly_chart(fig, use_container_width=True, key="chart_033")
+                st.plotly_chart(fig, use_container_width=True, key=f"chart_lab_{param}")
 
     sec("📊 TS vs VS CORRELATION")
     valid = lab_f.dropna(subset=["TS_pct", "VS_pct"])
@@ -1173,7 +1173,7 @@ def tab_dung_routes(all_data: dict, selected: list, date_filter: dict):
             fig.update_xaxes(showgrid=False)
             fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID)
             with col_w:
-                st.plotly_chart(fig, use_container_width=True, key="chart_036")
+                st.plotly_chart(fig, use_container_width=True, key=f"chart_dung_{rc}")
 
 
 def tab_fertilizer(all_data: dict, selected: list):
