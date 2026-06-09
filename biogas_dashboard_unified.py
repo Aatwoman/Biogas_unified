@@ -505,6 +505,9 @@ def _base(fig, height=480, xrange=None):
         zeroline=False, showline=True, linecolor="#d1dce8",
         tickfont=dict(size=11, color=FONT_COLOR),
         tickcolor=FONT_COLOR,
+        type="date",
+        rangemode="normal",
+        autorange=False if xrange is not None else True,
     )
     if xrange is not None:
         xaxis_kw["range"] = xrange
@@ -518,14 +521,19 @@ def _base(fig, height=480, xrange=None):
 
 
 def _xrange_from_filter(date_filter):
-    """Return [start, end] list for Plotly xaxis range, or None."""
+    """Return [start, end] list for Plotly xaxis range, or None.
+    Pads start by -1 day and end by +1 day so edge points are not clipped.
+    """
     if not date_filter:
         return None
     s = date_filter.get("start")
     e = date_filter.get("end")
     if s is None or e is None:
         return None
-    return [str(s.date()), str(e.date())]
+    import pandas as _pd
+    s_pad = (s - _pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    e_pad = (e + _pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    return [s_pad, e_pad]
 
 
 def line_fig(df, x, ycol, title, ylab="", ma=7, height=480, xrange=None):
@@ -1123,8 +1131,13 @@ def tab_lab(all_data, selected, date_filter):
                             borderwidth=1, font=dict(color=FONT_COLOR)),
                 height=420, margin=dict(l=12, r=12, t=48, b=12),
             )
-            xax_kw = dict(showgrid=True, gridcolor=CHART_GRID,
-                          tickfont=dict(color=FONT_COLOR))
+            xax_kw = dict(
+                showgrid=True, gridcolor=CHART_GRID,
+                tickfont=dict(color=FONT_COLOR),
+                type="date",
+                rangemode="normal",
+                autorange=False if xr else True,
+            )
             if xr:
                 xax_kw["range"] = xr
             fig.update_xaxes(**xax_kw)
