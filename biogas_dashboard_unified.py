@@ -480,6 +480,12 @@ def load_plant(file_bytes, plant_name):
 def _pmap(plants):
     return {p: PALETTE[i % len(PALETTE)] for i, p in enumerate(sorted(plants))}
 
+def _hex_to_rgba(hex_color, alpha=0.15):
+    """Convert '#rrggbb' to 'rgba(r,g,b,alpha)' for Plotly fill colors."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
 def _ma(s, w):
     return s.rolling(w, min_periods=1).mean()
 
@@ -724,7 +730,7 @@ def sidebar():
                 chosen_months = st.multiselect(
                     "Select months",
                     month_strs,
-                    default=[month_strs[-1]] if month_strs else [],
+                    default=month_strs,  # all months by default
                     key="month_picker",
                 )
                 if chosen_months:
@@ -1158,19 +1164,49 @@ def tab_lab(all_data, selected, date_filter):
 
 def tab_compare(all_data, selected, date_filter):
     sec("📊 CROSS-PLANT COMPARISON")
+    try:
+        _tab_compare_inner(all_data, selected, date_filter)
+    except Exception as e:
+        st.error(f"Compare tab error: {e}")
+        import traceback
+        with st.expander("Error details"):
+            st.code(traceback.format_exc())
+
+
+def _tab_compare_inner(all_data, selected, date_filter):
     if len(selected) < 2:
         st.info("Select **Compare** mode and choose at least 2 plants from the sidebar.")
         return
 
     ops = get_ops(all_data, selected, date_filter)
+
+    # Show per-plant data availability so user can diagnose missing data
+    st.markdown("**Data availability per plant:**")
+    diag_cols = st.columns(len(selected))
+    plants_with_data = []
+    for i, p in enumerate(selected):
+        pdata = all_data.get(p, {}).get("ops", pd.DataFrame())
+        filtered = _apply_date_filter(pdata, date_filter) if not pdata.empty else pdata
+        row_count = len(filtered)
+        if row_count > 0:
+            plants_with_data.append(p)
+            date_min = filtered["date"].min().strftime("%d %b %Y")
+            date_max = filtered["date"].max().strftime("%d %b %Y")
+            diag_cols[i].success(f"**{p}**  \n{row_count} rows  \n{date_min} → {date_max}")
+        else:
+            diag_cols[i].warning(f"**{p}**  \nNo data in selected range")
+
+    if len(plants_with_data) < 2:
+        st.warning(
+            f"Only **{len(plants_with_data)}** plant(s) have data in the selected range. "
+            "Adjust the date filter to include dates present in both plants."
+        )
+        if len(plants_with_data) == 0:
+            return
+        ops = get_ops(all_data, plants_with_data, date_filter)
+
     if ops.empty:
         st.warning("No operational data for the selected plants and date range.")
-        return
-
-    # Verify both plants actually have data
-    plants_with_data = ops["plant"].unique().tolist()
-    if len(plants_with_data) < 2:
-        st.warning(f"Only found data for: {plants_with_data}. Check date range.")
         return
 
     monthly = (
@@ -1259,11 +1295,10 @@ def tab_compare(all_data, selected, date_filter):
             vals  = [row.get(m, 0) for m in available_radar] + \
                     [row.get(available_radar[0], 0)]
             c = cmap.get(pname, PALETTE[0])
-            fill = c + "28"  # semi-transparent
             fig.add_trace(go.Scatterpolar(
                 r=vals, theta=theta, fill="toself", name=pname,
                 line=dict(color=c, width=2),
-                fillcolor=fill,
+                fillcolor=_hex_to_rgba(c, alpha=0.15),
             ))
         fig.update_layout(
             polar=dict(
