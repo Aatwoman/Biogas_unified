@@ -414,6 +414,7 @@ def _read_sheet(wb_bytes, sheet_name, fname=""):
 
 
 def load_daily_operations(wb_bytes, plant_name, fname=""):
+    import gc
     raw = _read_sheet(wb_bytes, "Daily Operations", fname=fname)
     _, hdr = _find_header_rows(raw)
     ds = hdr + 2
@@ -424,6 +425,7 @@ def load_daily_operations(wb_bytes, plant_name, fname=""):
         except Exception: pass
     col_idx = _build_col_index(raw)
     data = raw.iloc[ds:].reset_index(drop=True)
+    del raw; gc.collect()  # free the full sheet immediately
     all_keys = list(SEEK.keys()) + list(_SECOND.keys()) + \
                ["vpsa_kwh_total","bg_mfm_kwh_total","hp_comp_kwh_init","hp_comp_kwh_final"]
     records = {}
@@ -431,6 +433,7 @@ def load_daily_operations(wb_bytes, plant_name, fname=""):
         c = col_idx.get(key)
         records[key] = data.iloc[:,c].values if (c is not None and c < data.shape[1]) \
                        else np.full(len(data), np.nan, dtype=object)
+    del data; gc.collect()  # free the sliced sheet
     df = pd.DataFrame(records)
     df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
     df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
@@ -439,12 +442,17 @@ def load_daily_operations(wb_bytes, plant_name, fname=""):
     df["total_sales_kg"] = df["cbg_sales_kg"].fillna(0) + df["cascade_sales_kg"].fillna(0)
     df["plant"] = plant_name
     df = _clean_ops(df)
+    # Downcast float64 → float32 to halve memory usage
+    for col in df.select_dtypes(include="float64").columns:
+        df[col] = df[col].astype("float32")
     return df
 
 
 def load_lab_analysis(wb_bytes, plant_name, fname=""):
+    import gc
     raw = _read_sheet(wb_bytes, "Lab & Slurry Analysis", fname=fname)
     data = raw.iloc[3:].reset_index(drop=True).copy()
+    del raw; gc.collect()
     data.columns = range(data.shape[1])
     data.rename(columns={0:"date",1:"sample_point",2:"pH",3:"EC_mScm",
                           4:"TS_pct",5:"VS_pct",6:"Temp_C",7:"Carbon_pct"}, inplace=True)
@@ -464,9 +472,12 @@ def load_lab_analysis(wb_bytes, plant_name, fname=""):
 
 
 def load_dung_quality(wb_bytes, plant_name, fname=""):
+    import gc
     raw = _read_sheet(wb_bytes, "Dung Route Quality", fname=fname)
-    route_row, subcol_row = raw.iloc[0], raw.iloc[1]
-    data = raw.iloc[3:].reset_index(drop=True)
+    route_row = raw.iloc[0].copy()
+    subcol_row = raw.iloc[1].copy()
+    data = raw.iloc[3:].reset_index(drop=True).copy()
+    del raw; gc.collect()
     records, cur = [], None
     for c in range(1, data.shape[1], 4):
         if c < len(route_row) and pd.notna(route_row.iloc[c]):
@@ -485,6 +496,7 @@ def load_dung_quality(wb_bytes, plant_name, fname=""):
 
 
 def load_fertilizer_quality(wb_bytes, plant_name, fname=""):
+    import gc
     raw = _read_sheet(wb_bytes, "Fertilizer Quality", fname=fname)
     hi = 2
     for r in range(min(6, len(raw))):
@@ -492,6 +504,7 @@ def load_fertilizer_quality(wb_bytes, plant_name, fname=""):
             hi = r; break
     headers = [str(h).replace("\n"," ").strip() for h in raw.iloc[hi]]
     data = raw.iloc[hi+1:].reset_index(drop=True).copy()
+    del raw; gc.collect()
     data.columns = headers
     sr_col = headers[0]
     data = data[pd.to_numeric(data[sr_col], errors="coerce").notna()].copy()
@@ -507,7 +520,7 @@ def load_fertilizer_quality(wb_bytes, plant_name, fname=""):
     return data.reset_index(drop=True)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=4, ttl=3600)
 def load_plant(file_bytes, plant_name, fname=""):
     def _s(fn, label):
         try: return fn(file_bytes, plant_name, fname=fname)
@@ -723,6 +736,7 @@ def sidebar():
                 pname = st.text_input(f"Label: {f.name[:28]}", value=default, key=f"pn_{f.name}")
                 with st.spinner(f"Loading {pname}…"):
                     all_data[pname] = load_plant(rb, pname, fname=f.name)
+                del rb  # free upload bytes immediately after caching
 
         if not all_data:
             st.info("⬆ Upload one or more plant Excel files to begin.")
