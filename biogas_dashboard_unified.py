@@ -1,19 +1,24 @@
-
 """
-Biogas Plant Analytics Dashboard · Streamlit v9
-================================================
-FIXES v9:
- 1.  Sidebar fully light-mode (white bg, dark text, blue accents)
- 2.  Outliers removed via IQR-based per-column filter + explicit zero-guard
-     (total_purified_gas=0 on jan-15, total_generated_gas spike dec-07, etc.)
- 3.  Crash fix: st.columns() unpack — all tab functions now use list indexing
- 4.  Raw data tab works for single-file uploads (meta_cols always included)
- 5.  Purification efficiency scale normalised: values <5 multiplied ×100
- 6.  gen_inlet_diff + total_generated_gas outliers clipped via IQR
- 7.  Plant-profile radar REMOVED
- 8.  Nothing crashes after compare tab (try/except on every tab)
- 9.  Lab data: graceful "no data" message instead of empty chart crash
-10.  Sidebar redesigned: icons, collapsible sections, clean cards
+Biogas Plant Analytics Dashboard · Streamlit v10
+=================================================
+CHANGES v10:
+ 1.  Lab tab (both single & compare): per-plant per-parameter charts, vertical
+     legend, one panel per sample point → no more legend / colour clutter
+ 2.  Lab tab: daily aggregation (7 sub-samples → 1 daily avg per zone) before
+     plotting, plus IQR×3 outlier removal per (sample_point, column)
+ 3.  Lab tab: rolling-average slider (1–14 days) and outlier-toggle checkbox
+ 4.  TS vs VS scatter: replaced statsmodels OLS with numpy polyfit (no extra dep),
+     shows R² annotation; filters out VS > TS data-entry errors
+ 5.  H₂S threshold lines removed — they compressed the y-scale
+ 6.  CO₂ removed from gas composition charts; CH₄ shown solo for clarity
+ 7.  Gas tab: local MA-window slider so user can adjust without going to sidebar
+ 8.  Formula / source annotations added to chart titles across all tabs:
+       • FM_final − FM_initial for flow-meter cols
+       • Purified ÷ Raw × 100 for efficiency cols
+       • TS/VS formula descriptions in lab
+       • Digester reading time noted
+ 9.  Compare lab sub-section: per-parameter per-sample-point panels with one
+     line per plant — legend above chart, not below, avoids clipping
 """
 
 import io
@@ -597,20 +602,61 @@ def bar_fig(df, x, y, title, color="plant", height=460):
     return fig
 
 
-def scatter_fig(df, x, y, title, color="sample_point", height=480):
+def scatter_fig(df, x, y, title, color="sample_point", height=520):
+    """Scatter with per-group numpy trendlines — no statsmodels dependency."""
     cmap = _pmap(df[color].unique()) if color in df.columns else {}
-    fig = px.scatter(df, x=x, y=y, color=color, trendline="ols",
-                     title=title, color_discrete_map=cmap)
-    fig.update_traces(marker=dict(size=6,opacity=0.7))
-    fig.update_layout(paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
-                      font=dict(color=FONT_COLOR,family="Inter,sans-serif"),
-                      title_font=dict(size=13,color="#1e2d45",family="Space Mono,monospace"),
-                      legend=dict(orientation="h",yanchor="top",y=-0.18,xanchor="center",x=0.5,
-                                  bgcolor="rgba(255,255,255,.9)",bordercolor="#dde6f4",
-                                  borderwidth=1,font=dict(color=FONT_COLOR)),
-                      height=height, title_x=0, margin=dict(l=10,r=10,t=44,b=80))
-    fig.update_xaxes(showgrid=True,gridcolor=CHART_GRID,tickfont=dict(color=AXIS_COLOR))
-    fig.update_yaxes(showgrid=True,gridcolor=CHART_GRID,tickfont=dict(color=AXIS_COLOR))
+    fig = go.Figure()
+    groups = df.groupby(color) if color in df.columns else [("All", df)]
+    color_list = list(cmap.values()) if cmap else PALETTE
+
+    for i, (grp, gdf) in enumerate(groups):
+        c = cmap.get(grp, color_list[i % len(color_list)])
+        valid = gdf[[x, y]].dropna()
+        # scatter points
+        fig.add_trace(go.Scatter(
+            x=valid[x], y=valid[y], mode="markers", name=str(grp),
+            marker=dict(color=c, size=7, opacity=0.72,
+                        line=dict(color="white", width=0.5)),
+        ))
+        # numpy trendline (no external dep)
+        if len(valid) >= 3:
+            try:
+                m, b = np.polyfit(valid[x].values.astype(float),
+                                  valid[y].values.astype(float), 1)
+                xmin, xmax = valid[x].min(), valid[x].max()
+                x_line = np.array([xmin, xmax])
+                fig.add_trace(go.Scatter(
+                    x=x_line, y=m * x_line + b,
+                    mode="lines", name=f"{grp} trend",
+                    line=dict(color=c, width=1.8, dash="dash"),
+                    showlegend=False,
+                ))
+                # Add R² annotation in hover
+                ss_res = np.sum((valid[y].values - (m * valid[x].values + b)) ** 2)
+                ss_tot = np.sum((valid[y].values - valid[y].mean()) ** 2)
+                r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+                fig.add_annotation(
+                    x=xmax, y=m * xmax + b,
+                    text=f"R²={r2:.2f}", showarrow=False,
+                    font=dict(size=10, color=c), xanchor="right",
+                )
+            except Exception:
+                pass
+
+    fig.update_layout(
+        title=title,
+        paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
+        font=dict(color=FONT_COLOR, family="Inter,sans-serif"),
+        title_font=dict(size=13, color="#1e2d45", family="Space Mono,monospace"),
+        legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                    bgcolor="rgba(255,255,255,.9)", bordercolor="#dde6f4",
+                    borderwidth=1, font=dict(color=FONT_COLOR)),
+        height=height, title_x=0, margin=dict(l=10, r=10, t=44, b=80),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor=CHART_GRID,
+                     tickfont=dict(color=AXIS_COLOR), title_font=dict(color=AXIS_COLOR))
+    fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID,
+                     tickfont=dict(color=AXIS_COLOR), title_font=dict(color=AXIS_COLOR))
     return fig
 
 
@@ -791,26 +837,71 @@ def _cols3():
 def tab_gas(ops, ma, xr):
     try:
         sec("📊 GAS PRODUCTION & QUALITY")
+
+        # ── Local MA override ─────────────────────────────────────────────────
+        _ga, _gb = _cols2()
+        with _ga:
+            ma = st.slider("📉 Moving-average window (days)", 1, 30,
+                            st.session_state.get("ma_window", 7),
+                            key="gas_ma_local",
+                            help="Faint line = raw daily data; bold = rolling mean.")
+
         c1,c2 = _cols2()
-        with c1: _pc(line_fig(ops,"date","total_generated_gas","Raw Biogas Generated","m³/day",ma,xr=xr),"g1")
-        with c2: _pc(line_fig(ops,"date","total_purified_gas", "Purified Gas Output","m³/day",ma,xr=xr),"g2")
+        with c1:
+            _pc(line_fig(ops,"date","total_generated_gas",
+                         "Raw Biogas Generated  [FM_final − FM_initial]",
+                         "m³/day",ma,xr=xr),"g1")
+        with c2:
+            _pc(line_fig(ops,"date","total_purified_gas",
+                         "Purified Gas Output  [Purifier FM_final − FM_initial]",
+                         "m³/day",ma,xr=xr),"g2")
+
+        # CH₄ only — CO₂ traces removed (crowded the chart)
         c3,c4 = _cols2()
-        with c3: _pc(dual_fig(ops,"date","raw_ch4","CH₄","raw_co2","CO₂","Raw Gas Composition (%)",xr=xr),"g3")
-        with c4: _pc(dual_fig(ops,"date","pure_ch4","CH₄","pure_co2","CO₂","Purified Gas Composition (%)",xr=xr),"g4")
-        sec("⚠ H₂S LEVELS (PPM)")
+        with c3:
+            _pc(line_fig(ops,"date","raw_ch4",
+                         "Raw Gas CH₄ (%)  [Inline analyser, raw side]",
+                         "%",ma,xr=xr),"g3")
+        with c4:
+            _pc(line_fig(ops,"date","pure_ch4",
+                         "Purified Gas CH₄ (%)  [Inline analyser, pure side]",
+                         "%",ma,xr=xr),"g4")
+
+        sec("⚠ H₂S LEVELS (PPM)  ·  Thresholds hidden for readability")
         c5,c6 = _cols2()
         with c5:
-            fig=line_fig(ops,"date","raw_h2s","Raw Gas H₂S","PPM",ma,xr=xr)
-            fig.add_hline(y=500,line_dash="dash",line_color="#c62828",annotation_text="Alert 500 PPM",annotation_font_color="#c62828")
-            _pc(fig,"g5")
+            _pc(line_fig(ops,"date","raw_h2s",
+                         "Raw Gas H₂S (PPM)  [Inline analyser, raw side]",
+                         "PPM",ma,xr=xr),"g5")
         with c6:
-            fig=line_fig(ops,"date","pure_h2s","Purified Gas H₂S","PPM",ma,xr=xr)
-            fig.add_hline(y=50,line_dash="dash",line_color="#c84b00",annotation_text="Target <50 PPM",annotation_font_color="#c84b00")
-            _pc(fig,"g6")
+            _pc(line_fig(ops,"date","pure_h2s",
+                         "Purified Gas H₂S (PPM)  [Inline analyser, pure side]",
+                         "PPM",ma,xr=xr),"g6")
+
+        sec("⚗ PURIFICATION EFFICIENCY & BIOGAS RECOVERY")
+        c9,c10 = _cols2()
+        with c9:
+            fig=line_fig(ops,"date","purif_efficiency",
+                          "Purification Efficiency (%)  [Purified Gas ÷ Raw Gas × 100]",
+                          "%",ma,xr=xr)
+            fig.add_hline(y=95,line_dash="dot",line_color="#2e7d32",
+                           annotation_text="Target 95%",annotation_font_color="#2e7d32")
+            _pc(fig,"g9")
+        with c10:
+            _pc(line_fig(ops,"date","bg_recovery",
+                         "Biogas Recovery (%)  [Purified ÷ Total Generated × 100]",
+                         "%",ma,xr=xr),"g10")
+
         sec("📉 GAS BALANCE")
         c7,c8 = _cols2()
-        with c7: _pc(line_fig(ops,"date","flare_m3","Flare Gas","m³",ma,xr=xr),"g7")
-        with c8: _pc(line_fig(ops,"date","gen_inlet_diff","Gen–Inlet Differential","m³",ma,xr=xr),"g8")
+        with c7:
+            _pc(line_fig(ops,"date","flare_m3",
+                         "Flare Gas  [Manual meter reading]",
+                         "m³",ma,xr=xr),"g7")
+        with c8:
+            _pc(line_fig(ops,"date","gen_inlet_diff",
+                         "Gen–Inlet Differential  [Generator FM − Inlet FM]",
+                         "m³",ma,xr=xr),"g8")
     except Exception as e:
         st.error(f"Gas tab error: {e}")
 
@@ -819,19 +910,22 @@ def tab_feed(ops, ma, xr):
     try:
         sec("🐄 FEEDSTOCK & FEEDING")
         c1,c2 = _cols2()
-        with c1: _pc(line_fig(ops,"date","dung_tons","Dung Collected","tons/day",ma,xr=xr),"f1")
-        with c2: _pc(line_fig(ops,"date","total_feed_m3","Total Feed to Reactor","m³/day",ma,xr=xr),"f2")
+        with c1: _pc(line_fig(ops,"date","dung_tons",
+                               "Dung Collected  [Weighbridge / manual]","tons/day",ma,xr=xr),"f1")
+        with c2: _pc(line_fig(ops,"date","total_feed_m3",
+                               "Total Feed to Reactor  [Flow Meter Final − Initial]","m³/day",ma,xr=xr),"f2")
         c3,c4 = _cols2()
-        with c3: _pc(line_fig(ops,"date","total_filter_water","Filter Water Consumed","m³/day",ma,xr=xr),"f3")
+        with c3: _pc(line_fig(ops,"date","total_filter_water",
+                               "Filter Water  [FM Final − FM Initial]","m³/day",ma,xr=xr),"f3")
         with c4:
             if "waste_potato_tons" in ops.columns and ops["waste_potato_tons"].notna().any():
                 _pc(line_fig(ops,"date","waste_potato_tons","Waste Potato Added","tons/day",ma,xr=xr),"f4")
             else:
                 st.info("No waste-potato data for selected range.")
-        sec("📈 SPECIFIC BIOGAS YIELD")
+        sec("📈 SPECIFIC BIOGAS YIELD  [Total Generated Gas (m³) ÷ Dung Collected (tons)]")
         o2=ops.copy()
         o2["yield_m3_per_ton"]=np.where(o2["dung_tons"]>0,o2["total_generated_gas"]/o2["dung_tons"],np.nan)
-        _pc(line_fig(o2,"date","yield_m3_per_ton","Biogas Yield (m³ / ton dung)","m³/ton",ma,xr=xr),"f5")
+        _pc(line_fig(o2,"date","yield_m3_per_ton","Biogas Yield (m³/ton dung)","m³/ton",ma,xr=xr),"f5")
     except Exception as e:
         st.error(f"Feed tab error: {e}")
 
@@ -841,13 +935,19 @@ def tab_purif(ops, ma, xr):
         sec("⚗ PURIFICATION & CBG SALES")
         c1,c2 = _cols2()
         with c1:
-            fig=line_fig(ops,"date","purif_efficiency","Purification Efficiency","%",ma,xr=xr)
+            fig=line_fig(ops,"date","purif_efficiency",
+                          "Purification Efficiency (%)  [Purified Gas ÷ Raw Gas × 100]",
+                          "%",ma,xr=xr)
             fig.add_hline(y=95,line_dash="dot",line_color="#2e7d32",annotation_text="Target 95%",annotation_font_color="#2e7d32")
             _pc(fig,"p1")
-        with c2: _pc(line_fig(ops,"date","bg_recovery","Biogas Recovery","%",ma,xr=xr),"p2")
+        with c2: _pc(line_fig(ops,"date","bg_recovery",
+                               "Biogas Recovery (%)  [Purified ÷ Total Generated × 100]",
+                               "%",ma,xr=xr),"p2")
         c3,c4 = _cols2()
-        with c3: _pc(line_fig(ops,"date","cbg_sales_kg","CBG Sales – Dispenser","kg/day",ma,xr=xr),"p3")
-        with c4: _pc(line_fig(ops,"date","total_sales_kg","Total CBG Sales incl. Cascade","kg/day",ma,xr=xr),"p4")
+        with c3: _pc(line_fig(ops,"date","cbg_sales_kg",
+                               "CBG Sales – Dispenser  [Dispenser mass flow meter]","kg/day",ma,xr=xr),"p3")
+        with c4: _pc(line_fig(ops,"date","total_sales_kg",
+                               "Total CBG Sales  [Dispenser + Cascade]","kg/day",ma,xr=xr),"p4")
         sec("📅 MONTHLY CBG SALES")
         monthly=(ops.assign(month=ops["date"].dt.to_period("M").astype(str))
                     .groupby(["month","plant"],as_index=False)["cbg_sales_kg"].sum())
@@ -863,15 +963,19 @@ def tab_power(ops, ma, xr):
     try:
         sec("⚡ POWER & UTILITY CONSUMPTION")
         c1,c2 = _cols2()
-        with c1: _pc(line_fig(ops,"date","vpsa_kwh_total","VPSA Power Consumed","KWH/day",ma,xr=xr),"pw1")
-        with c2: _pc(line_fig(ops,"date","bg_mfm_kwh_total","Biogas MFM Power","KWH/day",ma,xr=xr),"pw2")
+        with c1: _pc(line_fig(ops,"date","vpsa_kwh_total",
+                               "VPSA Power  [KWH meter Final − Initial]","KWH/day",ma,xr=xr),"pw1")
+        with c2: _pc(line_fig(ops,"date","bg_mfm_kwh_total",
+                               "Biogas MFM Power  [KWH meter Final − Initial]","KWH/day",ma,xr=xr),"pw2")
         c3,c4 = _cols2()
-        with c3: _pc(line_fig(ops,"date","raw_water_m3","Raw Water Consumed","m³/day",ma,xr=xr),"pw3")
-        with c4: _pc(line_fig(ops,"date","poly_kg","Poly Consumption","kg/day",ma,xr=xr),"pw4")
+        with c3: _pc(line_fig(ops,"date","raw_water_m3",
+                               "Raw Water  [FM Final − FM Initial]","m³/day",ma,xr=xr),"pw3")
+        with c4: _pc(line_fig(ops,"date","poly_kg",
+                               "Poly Consumption  [Manual dosing log]","kg/day",ma,xr=xr),"pw4")
         c5,c6 = _cols2()
         with c5: _pc(line_fig(ops,"date","dg_hrs","DG Running Hours","hrs",1,xr=xr),"pw5")
         with c6: _pc(line_fig(ops,"date","dg_diesel_l","DG Diesel Consumed","L/day",ma,xr=xr),"pw6")
-        sec("💡 SPECIFIC ENERGY INTENSITY")
+        sec("💡 SPECIFIC ENERGY INTENSITY  [VPSA KWH ÷ Purified Gas (m³)]")
         o2=ops.copy()
         o2["kwh_per_m3"]=np.where(o2["total_purified_gas"]>0,o2["vpsa_kwh_total"]/o2["total_purified_gas"],np.nan)
         _pc(line_fig(o2,"date","kwh_per_m3","VPSA Specific Energy (KWH/m³ purified)","KWH/m³",ma,xr=xr),"pw7")
@@ -884,18 +988,20 @@ def tab_digester(ops, ma, xr):
         sec("🌡 DIGESTER CONDITIONS")
         c1,c2 = _cols2()
         with c1:
-            fig=line_fig(ops,"date","digester_temp","Digester Temperature","°C",ma,xr=xr)
+            fig=line_fig(ops,"date","digester_temp",
+                          "Digester Temperature (°C)  [9–10 AM manual reading]","°C",ma,xr=xr)
             fig.add_hline(y=37,line_dash="dash",line_color="#c84b00",annotation_text="Mesophilic 37°C",annotation_font_color="#c84b00")
             fig.add_hrect(y0=35,y1=40,fillcolor="#c84b00",opacity=0.05)
             _pc(fig,"d1")
         with c2:
-            fig=line_fig(ops,"date","digester_ph","Digester pH","pH",ma,xr=xr)
+            fig=line_fig(ops,"date","digester_ph",
+                          "Digester pH  [9–10 AM manual / probe reading]","pH",ma,xr=xr)
             fig.add_hrect(y0=6.8,y1=7.5,fillcolor="#2e7d32",opacity=0.07,annotation_text="Optimal 6.8–7.5",annotation_font_color="#2e7d32")
             _pc(fig,"d2")
-        sec("💧 DEWATERING")
+        sec("💧 DEWATERING  ·  Moisture (%) = (Wet – Dry) ÷ Wet × 100")
         c3,c4 = _cols2()
         with c3: _pc(dual_fig(ops,"date","screw_moisture","Screw Press","volute_moisture","Volute Press","Dewatering Moisture (%)",xr=xr),"d3")
-        with c4: _pc(line_fig(ops,"date","flare_m3","Flare Gas","m³",ma,xr=xr),"d4")
+        with c4: _pc(line_fig(ops,"date","flare_m3","Flare Gas  [Manual meter]","m³",ma,xr=xr),"d4")
         c5,c6,c7 = _cols3()
         with c5: _pc(line_fig(ops,"date","screw_press_hrs","Screw Press Hrs","hrs",1,height=440,xr=xr),"d5")
         with c6: _pc(line_fig(ops,"date","vibro_screen_hrs","Vibro Screen Hrs","hrs",1,height=440,xr=xr),"d6")
@@ -913,52 +1019,171 @@ def tab_lab(all_data, selected, df_flt):
             st.info("No lab data for this plant/date range. "
                     "Lab sheets may not have been filled in yet."); return
 
-        # Check if there's actually any numeric data (not just dates/sample_points)
-        num_cols = ["pH","EC_mScm","TS_pct","VS_pct","Temp_C","Carbon_pct"]
-        has_data = any(lab[c].notna().any() for c in num_cols if c in lab.columns)
+        num_cols_lab = ["pH","EC_mScm","TS_pct","VS_pct","Temp_C","Carbon_pct"]
+        has_data = any(lab[c].notna().any() for c in num_cols_lab if c in lab.columns)
         if not has_data:
-            st.info("Lab sheet found but all measurement cells are empty. "
-                    "No data to plot."); return
+            st.info("Lab sheet found but all measurement cells are empty."); return
 
-        xr = st.session_state.get("_xrange_cache")
-        pts = sorted(lab["sample_point"].dropna().unique())
-        defaults = [s for s in ["RCD (Raw Cattle Dung)","Digester Mid Sampling Point",
-                                 "Mixing Tank","Slurry Tank"] if s in pts] or pts[:3]
-        chosen = st.multiselect("Sample Points", pts, default=defaults, key="lab_pts")
-        if not chosen: st.info("Select at least one sample point."); return
+        # ── Controls row ──────────────────────────────────────────────────────
+        ctrl_a, ctrl_b, ctrl_c = st.columns([2, 1, 1])
+        with ctrl_a:
+            pts = sorted(lab["sample_point"].dropna().unique())
+            defaults = [s for s in ["RCD (Raw Cattle Dung)","Digester Mid Sampling Point",
+                                     "Mixing Tank","Slurry Tank"] if s in pts] or pts[:3]
+            chosen = st.multiselect("Sample Points", pts, default=defaults, key="lab_pts")
+        with ctrl_b:
+            lab_ma = st.slider("Rolling avg (days)", 1, 14, 1, key="lab_ma",
+                                help="Set >1 to smooth noisy lab readings (7 samples/day averaged to daily).")
+        with ctrl_c:
+            rm_lab_outliers = st.checkbox("Remove outliers (IQR×3)", value=True, key="lab_iqr")
 
-        lab_f = lab[lab["sample_point"].isin(chosen)]
-        params = [("pH","pH"),("TS_pct","TS (%)"),("VS_pct","VS (%)"),
-                  ("EC_mScm","EC (mS/cm)"),("Temp_C","Temperature (°C)"),("Carbon_pct","Carbon (%)")]
+        if not chosen:
+            st.info("Select at least one sample point."); return
+
+        lab_f = lab[lab["sample_point"].isin(chosen)].copy()
+
+        # Daily-aggregate: average all same-day readings per (date, plant, sample_point)
+        # This collapses the 7 daily sub-samples into one point per day per zone
+        id_cols = ["date","plant","sample_point"]
+        agg_cols = [c for c in num_cols_lab if c in lab_f.columns]
+        lab_f["date_only"] = lab_f["date"].dt.normalize()
+        lab_day = (lab_f.groupby(["date_only","plant","sample_point"], as_index=False)[agg_cols]
+                         .mean())
+        lab_day.rename(columns={"date_only":"date"}, inplace=True)
+
+        # IQR outlier removal per (param, sample_point)
+        if rm_lab_outliers:
+            for col in agg_cols:
+                for sp, gdf in lab_day.groupby("sample_point"):
+                    mask = lab_day["sample_point"] == sp
+                    lab_day.loc[mask, col] = _iqr_clip(lab_day.loc[mask, col], factor=3.0)
+
+        # Apply moving average to the daily-aggregated series
+        if lab_ma > 1:
+            result_parts = []
+            for (plant_val, sp_val), gdf in lab_day.groupby(["plant","sample_point"]):
+                gdf = gdf.sort_values("date").copy()
+                for col in agg_cols:
+                    gdf[col] = _ma(gdf[col], lab_ma)
+                result_parts.append(gdf)
+            lab_day = pd.concat(result_parts, ignore_index=True) if result_parts else lab_day
+
+        # ── PARAMETER DEFINITIONS with formulas / descriptions ────────────────
+        PARAM_META = {
+            "pH":         ("pH",         "pH",       "Acidity / alkalinity — optimal digester range 6.8–7.5"),
+            "TS_pct":     ("TS (%)",      "%",        "Total Solids  [TS % = (Dry weight ÷ Wet weight) × 100]"),
+            "VS_pct":     ("VS (%)",      "%",        "Volatile Solids  [VS % = (Dry loss on ignition ÷ Wet wt) × 100]"),
+            "EC_mScm":    ("EC (mS/cm)",  "mS/cm",    "Electrical Conductivity — indicator of salt / nutrient load"),
+            "Temp_C":     ("Temp (°C)",   "°C",       "Slurry temperature at sampling point"),
+            "Carbon_pct": ("Carbon (%)",  "%",        "Total organic carbon"),
+        }
+
+        # ── Per-plant separate charts (in Compare mode) ──────────────────────
+        # This prevents legend clutter when multiple plants × multiple sample points
+        plant_list = sorted(lab_day["plant"].unique())
+
+        params_to_show = [(k, v) for k, v in PARAM_META.items()
+                          if k in lab_day.columns and lab_day[k].dropna().shape[0] > 0]
         rendered = 0
-        for i in range(0, len(params), 2):
-            pair = params[i:i+2]
-            cl = st.columns(len(pair))
-            for j,(param,label) in enumerate(pair):
-                if param not in lab_f.columns or lab_f[param].dropna().empty: continue
-                sub = lab_f.dropna(subset=[param])
-                fig = px.line(sub, x="date", y=param, color="sample_point",
-                              facet_col="plant" if len(selected)>1 else None,
-                              title=f"{label} by Sample Point")
-                fig.update_layout(paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
-                    font=dict(color=FONT_COLOR,family="Inter,sans-serif"),
-                    title_font=dict(size=13,color="#1e2d45",family="Space Mono,monospace"),
-                    legend=dict(orientation="h",yanchor="top",y=-0.18,xanchor="center",x=0.5,
-                        bgcolor="rgba(255,255,255,.9)",bordercolor="#dde6f4",borderwidth=1,font=dict(color=FONT_COLOR)),
-                    height=480, margin=dict(l=10,r=10,t=44,b=80))
-                fig.update_xaxes(showgrid=True,gridcolor=CHART_GRID,tickfont=dict(color=AXIS_COLOR),type="date")
-                fig.update_yaxes(showgrid=True,gridcolor=CHART_GRID,tickfont=dict(color=AXIS_COLOR))
-                with cl[j]: st.plotly_chart(fig, use_container_width=True, key=f"lab_{param}")
-                rendered += 1
+
+        for param_key, (param_label, param_unit, param_desc) in params_to_show:
+            sec(f"📌 {param_label}  ·  {param_desc}")
+
+            # One column per plant — avoids all-on-one-axis mess
+            if len(plant_list) > 1:
+                plant_cols = st.columns(len(plant_list))
+            else:
+                plant_cols = [st.container()]
+
+            for pi, plant_val in enumerate(plant_list):
+                pdata = lab_day[lab_day["plant"] == plant_val].dropna(subset=[param_key])
+                if pdata.empty:
+                    with plant_cols[pi]:
+                        st.caption(f"No {param_label} data for {plant_val}")
+                    continue
+
+                fig = go.Figure()
+                sp_list = sorted(pdata["sample_point"].unique())
+                sp_colors = {sp: PALETTE[i % len(PALETTE)] for i, sp in enumerate(sp_list)}
+
+                for sp in sp_list:
+                    spd = pdata[pdata["sample_point"] == sp].sort_values("date")
+                    c = sp_colors[sp]
+                    # raw faint dots
+                    fig.add_trace(go.Scatter(
+                        x=spd["date"], y=spd[param_key],
+                        mode="markers", name=sp,
+                        marker=dict(color=c, size=5, opacity=0.45),
+                        showlegend=True,
+                    ))
+                    # smooth line if enough points
+                    if lab_ma > 1 or len(spd) >= 3:
+                        fig.add_trace(go.Scatter(
+                            x=spd["date"], y=spd[param_key],
+                            mode="lines", name=f"{sp} (line)",
+                            line=dict(color=c, width=1.8),
+                            opacity=0.9, showlegend=False,
+                        ))
+
+                # reference bands
+                if param_key == "pH":
+                    fig.add_hrect(y0=6.8, y1=7.5, fillcolor="#2e7d32",
+                                   opacity=0.06, annotation_text="Optimal 6.8–7.5",
+                                   annotation_font_color="#2e7d32")
+                elif param_key == "Temp_C":
+                    fig.add_hrect(y0=35, y1=40, fillcolor="#c84b00",
+                                   opacity=0.06, annotation_text="Mesophilic zone",
+                                   annotation_font_color="#c84b00")
+
+                fig.update_layout(
+                    title=f"{plant_val} — {param_label} ({param_unit})",
+                    paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
+                    font=dict(color=FONT_COLOR, family="Inter,sans-serif"),
+                    title_font=dict(size=12, color="#1e2d45", family="Space Mono,monospace"),
+                    legend=dict(
+                        orientation="v", yanchor="top", y=1.0,
+                        xanchor="left", x=1.01,
+                        bgcolor="rgba(255,255,255,0.9)",
+                        bordercolor="#dde6f4", borderwidth=1,
+                        font=dict(size=10, color=FONT_COLOR),
+                    ),
+                    height=380,
+                    margin=dict(l=10, r=150, t=44, b=40),
+                    hovermode="x unified",
+                    yaxis_title=param_unit,
+                )
+                fig.update_xaxes(showgrid=True, gridcolor=CHART_GRID,
+                                  tickfont=dict(size=10, color=AXIS_COLOR), type="date")
+                fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID,
+                                  tickfont=dict(size=10, color=AXIS_COLOR))
+                with plant_cols[pi]:
+                    st.plotly_chart(fig, use_container_width=True,
+                                    key=f"lab_{param_key}_{plant_val}")
+            rendered += 1
+
         if rendered == 0:
             st.info("No numeric lab measurements found for the selected sample points.")
             return
-        sec("📊 TS vs VS CORRELATION")
-        valid = lab_f.dropna(subset=["TS_pct","VS_pct"])
+
+        # ── TS vs VS correlation ──────────────────────────────────────────────
+        sec("📊 TS vs VS CORRELATION  [VS % is always ≤ TS %; ratio indicates organic fraction]")
+        valid = lab_day.dropna(subset=["TS_pct","VS_pct"])
         if not valid.empty:
-            _pc(scatter_fig(valid,"TS_pct","VS_pct","TS (%) vs VS (%)"),"lab_scatter")
+            # Filter obvious data-entry outliers (VS cannot exceed TS)
+            valid = valid[valid["VS_pct"] <= valid["TS_pct"]]
+            if not valid.empty:
+                _pc(scatter_fig(valid, "TS_pct", "VS_pct",
+                                "TS (%) vs VS (%)  —  slope ≈ organic fraction",
+                                color="sample_point"), "lab_scatter")
+            else:
+                st.info("No valid TS/VS pairs found (VS ≤ TS constraint).")
+        else:
+            st.info("Not enough TS/VS data for correlation plot.")
+
     except Exception as e:
+        import traceback
         st.error(f"Lab tab error: {e}")
+        with st.expander("Details"): st.code(traceback.format_exc())
 
 
 def tab_compare(all_data, selected, df_flt):
@@ -1000,9 +1225,9 @@ def tab_compare(all_data, selected, df_flt):
             ("total_generated_gas","Monthly Raw Biogas (m³)"),
             ("total_purified_gas", "Monthly Purified Gas (m³)"),
             ("cbg_sales_kg",       "Monthly CBG Sales (kg)"),
-            ("avg_purif_eff",      "Avg Purification Efficiency (%)"),
-            ("avg_ch4_raw",        "Avg Raw CH₄ (%)"),
-            ("avg_digester_temp",  "Avg Digester Temp (°C)"),
+            ("avg_purif_eff",      "Avg Purification Efficiency (%)  [Purified ÷ Raw × 100]"),
+            ("avg_ch4_raw",        "Avg Raw CH₄ (%)  [Inline analyser]"),
+            ("avg_digester_temp",  "Avg Digester Temp (°C)  [9–10 AM reading]"),
             ("dung_tons",          "Total Dung Collected (tons)"),
         ]:
             if col in monthly.columns and monthly[col].notna().any():
@@ -1011,13 +1236,125 @@ def tab_compare(all_data, selected, df_flt):
         sec("📈 DAILY OVERLAY")
         xr = _xrange(None); ma = st.session_state.get("ma_window",7)
         for col,title,ylab in [
-            ("total_generated_gas","Raw Biogas Generated (m³/day)","m³/day"),
-            ("total_purified_gas","Purified Gas (m³/day)","m³/day"),
-            ("purif_efficiency","Purification Efficiency (%)","% "),
+            ("total_generated_gas","Raw Biogas Generated (m³/day)  [FM_final − FM_initial]","m³/day"),
+            ("total_purified_gas","Purified Gas (m³/day)  [Purifier FM_final − FM_initial]","m³/day"),
+            ("purif_efficiency","Purification Efficiency (%)  [Purified ÷ Raw × 100]","% "),
             ("cbg_sales_kg","CBG Sales (kg/day)","kg"),
+            ("raw_ch4","Raw CH₄ (%)  [Inline analyser, raw side]","%"),
+            ("pure_ch4","Purified CH₄ (%)  [Inline analyser, pure side]","%"),
         ]:
             if col in ops.columns and ops[col].notna().any():
                 _pc(line_fig(ops,"date",col,title,ylab,ma,xr=xr),"cmpov_"+col)
+
+        # ── Lab sub-section: per-plant per-parameter, clearly separated ──────
+        sec("🔬 LAB DATA COMPARISON  ·  Daily averages per plant & sample point")
+        lab_all = get_lab(all_data, selected, df_flt)
+        if lab_all.empty:
+            st.info("No lab data available for comparison."); return
+
+        # Controls
+        lab_ctrl_a, lab_ctrl_b = st.columns([3, 1])
+        with lab_ctrl_a:
+            lab_pts_all = sorted(lab_all["sample_point"].dropna().unique())
+            lab_chosen = st.multiselect(
+                "Lab sample points to compare",
+                lab_pts_all,
+                default=[s for s in ["Digester Mid Sampling Point","Mixing Tank"]
+                         if s in lab_pts_all] or lab_pts_all[:2],
+                key="cmp_lab_pts",
+            )
+        with lab_ctrl_b:
+            cmp_lab_ma = st.slider("Avg window (days)", 1, 14, 7, key="cmp_lab_ma")
+
+        if not lab_chosen:
+            st.info("Select sample points above."); return
+
+        lab_f = lab_all[lab_all["sample_point"].isin(lab_chosen)].copy()
+
+        # Daily aggregate (collapses 7 sub-samples per day into one per zone)
+        agg_cols_lab = [c for c in ["pH","TS_pct","VS_pct","EC_mScm","Temp_C","Carbon_pct"]
+                        if c in lab_f.columns]
+        lab_f["date_only"] = lab_f["date"].dt.normalize()
+        lab_day = (lab_f.groupby(["date_only","plant","sample_point"], as_index=False)[agg_cols_lab]
+                         .mean())
+        lab_day.rename(columns={"date_only":"date"}, inplace=True)
+
+        # IQR outlier removal
+        for col in agg_cols_lab:
+            for sp, gdf in lab_day.groupby("sample_point"):
+                mask = lab_day["sample_point"] == sp
+                lab_day.loc[mask, col] = _iqr_clip(lab_day.loc[mask, col], factor=3.0)
+
+        # MA smoothing
+        if cmp_lab_ma > 1:
+            parts = []
+            for (p_val, sp_val), gdf in lab_day.groupby(["plant","sample_point"]):
+                gdf = gdf.sort_values("date").copy()
+                for col in agg_cols_lab:
+                    gdf[col] = _ma(gdf[col], cmp_lab_ma)
+                parts.append(gdf)
+            lab_day = pd.concat(parts, ignore_index=True) if parts else lab_day
+
+        LAB_META = {
+            "pH":         ("pH",        "pH"),
+            "TS_pct":     ("TS (%)",    "%"),
+            "VS_pct":     ("VS (%)",    "%"),
+            "EC_mScm":    ("EC mS/cm",  "mS/cm"),
+            "Temp_C":     ("Temp °C",   "°C"),
+            "Carbon_pct": ("Carbon %",  "%"),
+        }
+
+        for param_key, (param_label, param_unit) in LAB_META.items():
+            if param_key not in lab_day.columns or lab_day[param_key].dropna().empty:
+                continue
+
+            st.markdown(f"**{param_label}** — one panel per sample point")
+            panel_cols = st.columns(len(lab_chosen))
+
+            for pi, sp_val in enumerate(lab_chosen):
+                spdata = lab_day[lab_day["sample_point"] == sp_val].dropna(subset=[param_key])
+                if spdata.empty:
+                    with panel_cols[pi]:
+                        st.caption(f"No {param_label} for {sp_val[:30]}")
+                    continue
+
+                fig = go.Figure()
+                for plant_val, gdf in spdata.groupby("plant"):
+                    idx = sorted(lab_day["plant"].unique()).index(plant_val)
+                    c = PALETTE[idx % len(PALETTE)]
+                    gdf = gdf.sort_values("date")
+                    fig.add_trace(go.Scatter(
+                        x=gdf["date"], y=gdf[param_key],
+                        mode="lines+markers", name=plant_val,
+                        line=dict(color=c, width=2.2),
+                        marker=dict(size=4, opacity=0.6),
+                    ))
+
+                sp_short = sp_val[:28] + ("…" if len(sp_val) > 28 else "")
+                fig.update_layout(
+                    title=f"{sp_short}",
+                    paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
+                    font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=11),
+                    title_font=dict(size=11, color="#1e2d45", family="Space Mono,monospace"),
+                    legend=dict(
+                        orientation="h", yanchor="bottom", y=1.04,
+                        xanchor="left", x=0,
+                        bgcolor="rgba(255,255,255,0.9)",
+                        bordercolor="#dde6f4", borderwidth=1,
+                        font=dict(size=9, color=FONT_COLOR),
+                    ),
+                    height=320,
+                    margin=dict(l=10, r=10, t=60, b=30),
+                    hovermode="x unified",
+                    yaxis_title=param_unit,
+                )
+                fig.update_xaxes(showgrid=True, gridcolor=CHART_GRID,
+                                  tickfont=dict(size=9, color=AXIS_COLOR), type="date")
+                fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID,
+                                  tickfont=dict(size=9, color=AXIS_COLOR))
+                with panel_cols[pi]:
+                    st.plotly_chart(fig, use_container_width=True,
+                                    key=f"cmp_lab_{param_key}_{sp_val[:20]}")
 
     except Exception as e:
         import traceback
