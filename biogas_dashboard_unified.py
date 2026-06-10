@@ -663,8 +663,23 @@ def scatter_fig(df, x, y, title, color="sample_point", height=520):
 def sec(text):
     st.markdown(f'<div class="sec-hdr">{text}</div>', unsafe_allow_html=True)
 
+def _has_data(df, col):
+    """Return True if col exists in df, has at least one non-null, non-zero value."""
+    if df is None or df.empty or col not in df.columns:
+        return False
+    s = df[col].dropna()
+    return len(s) > 0 and (s != 0).any()
+
 def _pc(fig, key, height=None):
     if height: fig.update_layout(height=height)
+    # Check whether the figure actually has any visible data
+    has_visible = any(
+        (tr.y is not None and len(tr.y) > 0) or
+        (tr.r is not None and len(tr.r) > 0)
+        for tr in fig.data
+    )
+    if not has_visible:
+        return  # silently skip empty charts
     st.plotly_chart(fig, use_container_width=True, key=key)
 
 
@@ -795,24 +810,34 @@ def get_lab(all_data, selected, df_flt):
 
 
 # ── KPI row ───────────────────────────────────────────────────────────────────
-def render_kpis(ops):
-    if ops.empty:
-        st.warning("No operational data for the selected range."); return
-    def sm(c): return ops[c].dropna().mean() if c in ops.columns else float("nan")
-    def ss(c): return ops[c].dropna().sum()  if c in ops.columns else float("nan")
+def _kpi_cards(df, label_prefix=""):
+    """Render 8 KPI cards for a single plant's ops dataframe."""
+    def sm(c): return df[c].dropna().mean() if c in df.columns else float("nan")
+    def ss(c): return df[c].dropna().sum()  if c in df.columns else float("nan")
+    import math
+    def fmt(v, decimals=1):
+        if math.isnan(v): return "–"
+        return f"{v:,.{decimals}f}"
+
     kpis = [
-        ("🌿","Avg Biogas Gen",   f"{sm('total_generated_gas'):.0f}","m³/day"),
-        ("🏭","Total CBG Sales",  f"{ss('cbg_sales_kg'):,.0f}","kg"),
-        ("⚗","Avg Purif. Eff.",  f"{sm('purif_efficiency'):.1f}","%"),
-        ("🔬","Avg CH₄ Raw",      f"{sm('raw_ch4'):.1f}","%"),
-        ("✨","Avg CH₄ Pure",     f"{sm('pure_ch4'):.1f}","%"),
-        ("🌡","Avg Digester Temp",f"{sm('digester_temp'):.1f}","°C"),
-        ("⚡","Avg VPSA Power",   f"{sm('vpsa_kwh_total'):.0f}","KWH/day"),
-        ("🐄","Avg Dung Input",   f"{sm('dung_tons'):.1f}","tons/day"),
+        ("🌿", "Avg Biogas Raw",    fmt(sm("total_generated_gas"), 0), "m³/day"),
+        ("💨", "Avg Biogas Pure",   fmt(sm("total_purified_gas"), 0),  "m³/day"),
+        ("⚗",  "Purif. Eff.",       fmt(sm("purif_efficiency"), 1),    "%"),
+        ("✨", "Avg CH₄ Pure",      fmt(sm("pure_ch4"), 1),            "%"),
+        ("🌡", "Avg Digester Temp", fmt(sm("digester_temp"), 1),       "°C"),
+        ("🧪", "Avg Digester pH",   fmt(sm("digester_ph"), 2),         "pH"),
+        ("🐄", "Avg Dung Input",    fmt(sm("dung_tons"), 1),           "tons/day"),
+        ("🔥", "Total Flaring",     fmt(ss("flare_m3"), 0),            "m³ total"),
     ]
+    if label_prefix:
+        st.markdown(
+            f"<div style='font-family:Space Mono,monospace;font-size:0.75rem;"
+            f"color:#1a56db;font-weight:700;letter-spacing:.06em;"
+            f"margin:6px 0 4px;'>🏭 {label_prefix.upper()}</div>",
+            unsafe_allow_html=True)
     r1 = st.columns(4); r2 = st.columns(4)
-    for i,(icon,label,value,unit) in enumerate(kpis):
-        col = (r1 if i<4 else r2)[i%4]
+    for i, (icon, label, value, unit) in enumerate(kpis):
+        col = (r1 if i < 4 else r2)[i % 4]
         with col:
             st.markdown(f"""
 <div class="kpi-card">
@@ -820,7 +845,29 @@ def render_kpis(ops):
   <div class="kpi-value">{value}</div>
   <div class="kpi-label">{label}&nbsp;·&nbsp;{unit}</div>
 </div>""", unsafe_allow_html=True)
-    st.markdown("")
+
+
+def render_kpis(ops, all_data=None, selected=None, date_filter=None, view_mode="individual"):
+    if ops.empty:
+        st.warning("No operational data for the selected range."); return
+
+    if view_mode == "compare" and all_data and selected and len(selected) >= 2:
+        # One KPI block per plant — never averaged together
+        for p in selected:
+            pdf = all_data.get(p, {}).get("ops", pd.DataFrame())
+            if not pdf.empty and date_filter:
+                pdf = _flt(pdf, date_filter)
+            if pdf.empty:
+                st.markdown(
+                    f"<div style='font-family:Space Mono,monospace;font-size:0.75rem;"
+                    f"color:#c84b00;'>⚠ {p}: no data in selected range</div>",
+                    unsafe_allow_html=True)
+            else:
+                _kpi_cards(pdf, label_prefix=p)
+            st.markdown("")
+    else:
+        _kpi_cards(ops)
+        st.markdown("")
 
 
 # ── Tab helper: safe two-column layout ───────────────────────────────────────
@@ -1564,7 +1611,8 @@ def main():
     # cache xr for sub-functions that don't receive it
     st.session_state["_xrange_cache"] = xr
 
-    render_kpis(ops)
+    render_kpis(ops, all_data=all_data, selected=selected,
+                  date_filter=date_filter, view_mode=view_mode)
     st.markdown("---")
 
     if view_mode == "compare" and len(selected) >= 2:
