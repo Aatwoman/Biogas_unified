@@ -399,18 +399,22 @@ def _to_num(s):
 
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
-def _read_sheet(wb_bytes, sheet_name):
-    """Read an Excel sheet from bytes, auto-detecting .xlsb vs .xlsx engine."""
-    try:
-        return pd.read_excel(io.BytesIO(wb_bytes), sheet_name=sheet_name,
-                             header=None, engine="pyxlsb")
-    except Exception:
-        return pd.read_excel(io.BytesIO(wb_bytes), sheet_name=sheet_name,
-                             header=None)
+def _read_sheet(wb_bytes, sheet_name, fname=""):
+    """Read an Excel sheet, choosing engine based on file extension."""
+    fname_lower = (fname or "").lower()
+    if fname_lower.endswith(".xlsb"):
+        try:
+            import pyxlsb  # noqa
+            return pd.read_excel(io.BytesIO(wb_bytes), sheet_name=sheet_name,
+                                 header=None, engine="pyxlsb")
+        except ImportError:
+            st.error("pyxlsb is not installed. Add `pyxlsb` to requirements.txt.")
+            raise
+    return pd.read_excel(io.BytesIO(wb_bytes), sheet_name=sheet_name, header=None)
 
 
-def load_daily_operations(wb_bytes, plant_name):
-    raw = _read_sheet(wb_bytes, "Daily Operations")
+def load_daily_operations(wb_bytes, plant_name, fname=""):
+    raw = _read_sheet(wb_bytes, "Daily Operations", fname=fname)
     _, hdr = _find_header_rows(raw)
     ds = hdr + 2
     for r in range(ds, min(ds+5, len(raw))):
@@ -438,8 +442,8 @@ def load_daily_operations(wb_bytes, plant_name):
     return df
 
 
-def load_lab_analysis(wb_bytes, plant_name):
-    raw = _read_sheet(wb_bytes, "Lab & Slurry Analysis")
+def load_lab_analysis(wb_bytes, plant_name, fname=""):
+    raw = _read_sheet(wb_bytes, "Lab & Slurry Analysis", fname=fname)
     data = raw.iloc[3:].reset_index(drop=True).copy()
     data.columns = range(data.shape[1])
     data.rename(columns={0:"date",1:"sample_point",2:"pH",3:"EC_mScm",
@@ -459,8 +463,8 @@ def load_lab_analysis(wb_bytes, plant_name):
     return data[cols].reset_index(drop=True)
 
 
-def load_dung_quality(wb_bytes, plant_name):
-    raw = _read_sheet(wb_bytes, "Dung Route Quality")
+def load_dung_quality(wb_bytes, plant_name, fname=""):
+    raw = _read_sheet(wb_bytes, "Dung Route Quality", fname=fname)
     route_row, subcol_row = raw.iloc[0], raw.iloc[1]
     data = raw.iloc[3:].reset_index(drop=True)
     records, cur = [], None
@@ -480,8 +484,8 @@ def load_dung_quality(wb_bytes, plant_name):
     return pd.DataFrame(records).sort_values("date").reset_index(drop=True) if records else pd.DataFrame()
 
 
-def load_fertilizer_quality(wb_bytes, plant_name):
-    raw = _read_sheet(wb_bytes, "Fertilizer Quality")
+def load_fertilizer_quality(wb_bytes, plant_name, fname=""):
+    raw = _read_sheet(wb_bytes, "Fertilizer Quality", fname=fname)
     hi = 2
     for r in range(min(6, len(raw))):
         if str(raw.iloc[r,0]).replace("\n"," ").strip().lower().startswith("sr"):
@@ -504,9 +508,9 @@ def load_fertilizer_quality(wb_bytes, plant_name):
 
 
 @st.cache_data(show_spinner=False)
-def load_plant(file_bytes, plant_name):
+def load_plant(file_bytes, plant_name, fname=""):
     def _s(fn, label):
-        try: return fn(file_bytes, plant_name)
+        try: return fn(file_bytes, plant_name, fname=fname)
         except Exception as e:
             st.warning(f"⚠ [{plant_name}] {label}: {e}"); return pd.DataFrame()
     return {"ops":_s(load_daily_operations,"Daily Operations"),
@@ -718,7 +722,7 @@ def sidebar():
                 default = f.name.replace(".xlsb","").replace(".xlsx","").replace("_"," ").title()
                 pname = st.text_input(f"Label: {f.name[:28]}", value=default, key=f"pn_{f.name}")
                 with st.spinner(f"Loading {pname}…"):
-                    all_data[pname] = load_plant(rb, pname)
+                    all_data[pname] = load_plant(rb, pname, fname=f.name)
 
         if not all_data:
             st.info("⬆ Upload one or more plant Excel files to begin.")
@@ -1557,7 +1561,7 @@ def tab_raw(ops, all_data, selected, df_flt):
                 key="dl_xlsx")
 
         with st.expander("📊 Summary Statistics"):
-            num_c = [c for c in sel_cols if ops_raw[c].dtype in [float,np.float64]]
+            num_c = [c for c in sel_cols if pd.api.types.is_float_dtype(ops_raw[c])]
             if num_c:
                 stats = ops_raw[num_c].describe().T.round(2)
                 stats.index = [COL_LABELS.get(c,c) for c in stats.index]
