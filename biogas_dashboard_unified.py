@@ -399,8 +399,18 @@ def _to_num(s):
 
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
+def _read_sheet(wb_bytes, sheet_name):
+    """Read an Excel sheet from bytes, auto-detecting .xlsb vs .xlsx engine."""
+    try:
+        return pd.read_excel(io.BytesIO(wb_bytes), sheet_name=sheet_name,
+                             header=None, engine="pyxlsb")
+    except Exception:
+        return pd.read_excel(io.BytesIO(wb_bytes), sheet_name=sheet_name,
+                             header=None)
+
+
 def load_daily_operations(wb_bytes, plant_name):
-    raw = pd.read_excel(io.BytesIO(wb_bytes), sheet_name="Daily Operations", header=None)
+    raw = _read_sheet(wb_bytes, "Daily Operations")
     _, hdr = _find_header_rows(raw)
     ds = hdr + 2
     for r in range(ds, min(ds+5, len(raw))):
@@ -429,7 +439,7 @@ def load_daily_operations(wb_bytes, plant_name):
 
 
 def load_lab_analysis(wb_bytes, plant_name):
-    raw = pd.read_excel(io.BytesIO(wb_bytes), sheet_name="Lab & Slurry Analysis", header=None)
+    raw = _read_sheet(wb_bytes, "Lab & Slurry Analysis")
     data = raw.iloc[3:].reset_index(drop=True).copy()
     data.columns = range(data.shape[1])
     data.rename(columns={0:"date",1:"sample_point",2:"pH",3:"EC_mScm",
@@ -450,7 +460,7 @@ def load_lab_analysis(wb_bytes, plant_name):
 
 
 def load_dung_quality(wb_bytes, plant_name):
-    raw = pd.read_excel(io.BytesIO(wb_bytes), sheet_name="Dung Route Quality", header=None)
+    raw = _read_sheet(wb_bytes, "Dung Route Quality")
     route_row, subcol_row = raw.iloc[0], raw.iloc[1]
     data = raw.iloc[3:].reset_index(drop=True)
     records, cur = [], None
@@ -471,7 +481,7 @@ def load_dung_quality(wb_bytes, plant_name):
 
 
 def load_fertilizer_quality(wb_bytes, plant_name):
-    raw = pd.read_excel(io.BytesIO(wb_bytes), sheet_name="Fertilizer Quality", header=None)
+    raw = _read_sheet(wb_bytes, "Fertilizer Quality")
     hi = 2
     for r in range(min(6, len(raw))):
         if str(raw.iloc[r,0]).replace("\n"," ").strip().lower().startswith("sr"):
@@ -696,8 +706,8 @@ def sidebar():
         # Upload section
         st.markdown('<div class="sb-section-label">📂 DATA SOURCE</div>', unsafe_allow_html=True)
         uploaded = st.file_uploader(
-            "Upload Excel file(s)", type=["xlsx"], accept_multiple_files=True,
-            help="One .xlsx per plant — Unified Daily Report format.",
+            "Upload Excel file(s)", type=["xlsx", "xlsb"], accept_multiple_files=True,
+            help="One .xlsx or .xlsb per plant — Unified Daily Report format.",
             label_visibility="collapsed",
         )
 
@@ -705,7 +715,7 @@ def sidebar():
         if uploaded:
             for f in uploaded:
                 rb = f.read()
-                default = f.name.replace(".xlsx","").replace("_"," ").title()
+                default = f.name.replace(".xlsb","").replace(".xlsx","").replace("_"," ").title()
                 pname = st.text_input(f"Label: {f.name[:28]}", value=default, key=f"pn_{f.name}")
                 with st.spinner(f"Loading {pname}…"):
                     all_data[pname] = load_plant(rb, pname)
