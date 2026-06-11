@@ -1200,6 +1200,7 @@ def _render_mfm_vs_expected(all_data, selected, date_filter):
 
 
 
+def _render_yield_chart(all_data, selected, date_filter):
     """Bar+line chart of daily biogas yield (m³/ton feedstock) for each plant."""
     try:
         cmap = _pmap(selected)
