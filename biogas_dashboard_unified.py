@@ -1,24 +1,30 @@
 """
-Biogas Plant Analytics Dashboard · Streamlit v10
+Biogas Plant Analytics Dashboard · Streamlit v11
 =================================================
+CHANGES v11:
+ 1.  KPI: Raw material split — Dung + Waste Potato in same card
+ 2.  KPI: Biogas Yield (m³/ton feedstock) card
+ 3.  KPI: Total CBG Sale card — Dispenser + Cascade combined
+ 4.  KPI: MFM Reading card (bg_mfm_kwh_total)
+ 5.  KPI: Electricity Consumed card (vpsa_kwh_total)
+ 6.  KPI: Optimum-range indicator pill shown where applicable
+ 7.  KPI layout: 5-column first row + 5-column second row, all visible above graphs
+ 8.  Graphs: All replaced with bar+line(rolling avg) via bar_line_fig()
+ 9.  Rolling avg window selectable 1–14 days (sidebar + per-tab override)
+10.  Legend items clickable to show/hide series (Plotly interactive legend)
+11.  Weekly date select added to sidebar (ISO week picker)
+12.  Month vs Month comparison tab (same plant) — select any 2 months, overlay daily trends
+
 CHANGES v10:
- 1.  Lab tab (both single & compare): per-plant per-parameter charts, vertical
-     legend, one panel per sample point → no more legend / colour clutter
- 2.  Lab tab: daily aggregation (7 sub-samples → 1 daily avg per zone) before
-     plotting, plus IQR×3 outlier removal per (sample_point, column)
- 3.  Lab tab: rolling-average slider (1–14 days) and outlier-toggle checkbox
- 4.  TS vs VS scatter: replaced statsmodels OLS with numpy polyfit (no extra dep),
-     shows R² annotation; filters out VS > TS data-entry errors
- 5.  H₂S threshold lines removed — they compressed the y-scale
- 6.  CO₂ removed from gas composition charts; CH₄ shown solo for clarity
- 7.  Gas tab: local MA-window slider so user can adjust without going to sidebar
- 8.  Formula / source annotations added to chart titles across all tabs:
-       • FM_final − FM_initial for flow-meter cols
-       • Purified ÷ Raw × 100 for efficiency cols
-       • TS/VS formula descriptions in lab
-       • Digester reading time noted
- 9.  Compare lab sub-section: per-parameter per-sample-point panels with one
-     line per plant — legend above chart, not below, avoids clipping
+ 1.  Lab tab per-plant per-parameter charts, vertical legend
+ 2.  Lab daily aggregation + IQR×3 outlier removal
+ 3.  Lab rolling-average slider and outlier-toggle checkbox
+ 4.  TS vs VS scatter with numpy polyfit R²
+ 5.  H₂S threshold lines removed
+ 6.  CO₂ removed from gas composition charts
+ 7.  Gas tab local MA-window slider
+ 8.  Formula / source annotations in chart titles
+ 9.  Compare lab sub-section per-parameter per-sample-point panels
 """
 
 import io
@@ -575,6 +581,57 @@ def _base(fig, height=500, xr=None):
     return fig
 
 
+def bar_line_fig(df, x, ycol, title, ylab="", ma=7, height=420, xr=None,
+                 opt_low=None, opt_high=None):
+    """
+    Bar chart with daily values + rolling-average line on top.
+    Legend items are click-to-hide (Plotly interactive legend).
+    Optional optimum range band via opt_low / opt_high.
+    """
+    fig = go.Figure()
+    if df.empty or ycol not in df.columns:
+        return _base(fig, height, xr)
+    cmap = _pmap(df["plant"].unique())
+    for p, gdf in df.groupby("plant"):
+        s = gdf[ycol]; c = cmap[p]; valid = s.notna().sum()
+        if valid == 0:
+            continue
+        # ── Bar (daily) ──────────────────────────────────────────────────────
+        fig.add_trace(go.Bar(
+            x=gdf[x], y=s,
+            name=f"{p} daily",
+            marker_color=_hex_rgba(c, 0.55),
+            marker_line_width=0,
+            legendgroup=p,
+        ))
+        # ── Rolling avg line ─────────────────────────────────────────────────
+        if valid >= 1:
+            ma_w = max(1, min(ma, valid))
+            fig.add_trace(go.Scatter(
+                x=gdf[x], y=_ma(s, ma_w),
+                name=f"{p} {ma_w}d avg",
+                mode="lines",
+                line=dict(color=c, width=2.6),
+                legendgroup=p,
+            ))
+    # Optimum range band
+    if opt_low is not None and opt_high is not None:
+        fig.add_hrect(
+            y0=opt_low, y1=opt_high,
+            fillcolor="#2e7d32", opacity=0.06,
+            line_width=0,
+            annotation_text=f"Optimal {opt_low}–{opt_high}",
+            annotation_font_color="#2e7d32",
+            annotation_font_size=10,
+        )
+    fig.update_layout(
+        title=title, yaxis_title=ylab,
+        barmode="group",
+        bargap=0.15, bargroupgap=0.05,
+    )
+    return _base(fig, height, xr)
+
+
 def line_fig(df, x, ycol, title, ylab="", ma=7, height=500, xr=None):
     fig = go.Figure()
     if df.empty or ycol not in df.columns:
@@ -773,7 +830,7 @@ def sidebar():
             st.markdown('<div class="sb-section"></div>', unsafe_allow_html=True)
             st.markdown('<div class="sb-section-label">📅 DATE FILTER</div>', unsafe_allow_html=True)
 
-            ftype = st.radio("Filter by", ["All Data","Month picker","Custom range"],
+            ftype = st.radio("Filter by", ["All Data","Month picker","Week picker","Custom range"],
                              key="ftype", label_visibility="collapsed")
 
             if ftype == "Month picker":
@@ -785,6 +842,22 @@ def sidebar():
                     date_filter = {"start":min(p.start_time for p in periods),
                                    "end":  max(p.end_time   for p in periods),
                                    "months": chosen}
+            elif ftype == "Week picker":
+                # Build list of ISO weeks in data range
+                all_weeks = pd.date_range(data_min, data_max, freq="W-MON")
+                if len(all_weeks) == 0:
+                    all_weeks = pd.date_range(data_min, data_max + pd.Timedelta(days=7), freq="W-MON")
+                week_labels = [f"W{d.isocalendar()[1]:02d} {d.year}  ({d.strftime('%d %b')}–{(d+pd.Timedelta(days=6)).strftime('%d %b')})"
+                               for d in all_weeks]
+                week_map = {lbl: d for lbl, d in zip(week_labels, all_weeks)}
+                chosen_weeks = st.multiselect("Select week(s)", week_labels,
+                                               default=week_labels[-1:] if week_labels else [],
+                                               key="weeks")
+                if chosen_weeks:
+                    starts = [week_map[w] for w in chosen_weeks]
+                    ends   = [s + pd.Timedelta(days=6) for s in starts]
+                    date_filter = {"start": pd.Timestamp(min(starts)),
+                                   "end":   pd.Timestamp(min(max(ends), pd.Timestamp(data_max)))}
             elif ftype == "Custom range":
                 dr = st.date_input("Range", value=(data_min, data_max),
                                    min_value=data_min, max_value=data_max, key="dr")
@@ -839,40 +912,118 @@ def get_lab(all_data, selected, df_flt):
 
 # ── KPI row ───────────────────────────────────────────────────────────────────
 def _kpi_cards(df, label_prefix=""):
-    """Render 8 KPI cards for a single plant's ops dataframe."""
+    """Render 10 KPI cards (5+5) for a single plant's ops dataframe."""
     def sm(c): return df[c].dropna().mean() if c in df.columns else float("nan")
     def ss(c): return df[c].dropna().sum()  if c in df.columns else float("nan")
     import math
     def fmt(v, decimals=1):
-        if math.isnan(v): return "–"
+        if isinstance(v, float) and math.isnan(v): return "–"
         return f"{v:,.{decimals}f}"
 
-    kpis = [
-        ("🌿", "Avg Biogas Raw",    fmt(sm("total_generated_gas"), 0), "m³/day"),
-        ("💨", "Avg Biogas Pure",   fmt(sm("total_purified_gas"), 0),  "m³/day"),
-        ("⚗",  "Purif. Eff.",       fmt(sm("purif_efficiency"), 1),    "%"),
-        ("✨", "Avg CH₄ Pure",      fmt(sm("pure_ch4"), 1),            "%"),
-        ("🌡", "Avg Digester Temp", fmt(sm("digester_temp"), 1),       "°C"),
-        ("🧪", "Avg Digester pH",   fmt(sm("digester_ph"), 2),         "pH"),
-        ("🐄", "Avg Dung Input",    fmt(sm("dung_tons"), 1),           "tons/day"),
-        ("🔥", "Total Flaring",     fmt(ss("flare_m3"), 0),            "m³ total"),
+    # ── Raw material ──────────────────────────────────────────────────────────
+    dung_avg    = sm("dung_tons")
+    potato_avg  = sm("waste_potato_tons")
+    rm_lines = []
+    if not math.isnan(dung_avg):
+        rm_lines.append(f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(dung_avg, 1)}</span>"
+                        f"<span style='font-size:.65rem;color:#5a7a9a'> t/d dung</span>")
+    if not math.isnan(potato_avg):
+        rm_lines.append(f"<span style='font-size:.9rem;font-weight:700;color:#2e7d32'>{fmt(potato_avg, 1)}</span>"
+                        f"<span style='font-size:.65rem;color:#5a7a9a'> t/d potato</span>")
+    rm_html = "<br>".join(rm_lines) if rm_lines else "–"
+
+    # ── Yield ─────────────────────────────────────────────────────────────────
+    total_gas = df["total_generated_gas"].dropna() if "total_generated_gas" in df.columns else pd.Series(dtype=float)
+    total_feed = (df["dung_tons"].fillna(0) + df["waste_potato_tons"].fillna(0)
+                  ) if "waste_potato_tons" in df.columns else df["dung_tons"].fillna(0) if "dung_tons" in df.columns else pd.Series(0, index=df.index)
+    mask = total_feed > 0
+    if mask.any() and "total_generated_gas" in df.columns:
+        yield_series = df.loc[mask, "total_generated_gas"] / total_feed[mask]
+        yield_val = fmt(yield_series.dropna().mean(), 1)
+    else:
+        yield_val = "–"
+
+    # ── CBG sales (dispenser + cascade) ──────────────────────────────────────
+    disp_sum  = ss("cbg_sales_kg")
+    casc_sum  = ss("cascade_sales_kg")
+    import math as _math
+    cbg_disp  = disp_sum if not _math.isnan(disp_sum) else 0
+    cbg_casc  = casc_sum if not _math.isnan(casc_sum) else 0
+    cbg_total = cbg_disp + cbg_casc
+    cbg_lines = []
+    if cbg_total > 0:
+        cbg_lines.append(f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{cbg_total:,.0f}</span>"
+                         f"<span style='font-size:.65rem;color:#5a7a9a'> kg total</span>")
+        if cbg_casc > 0:
+            cbg_lines.append(f"<span style='font-size:.78rem;color:#c84b00'>{cbg_disp:,.0f}</span>"
+                             f"<span style='font-size:.63rem;color:#5a7a9a'> disp · </span>"
+                             f"<span style='font-size:.78rem;color:#7b1fa2'>{cbg_casc:,.0f}</span>"
+                             f"<span style='font-size:.63rem;color:#5a7a9a'> casc</span>")
+    cbg_html = "<br>".join(cbg_lines) if cbg_lines else "–"
+
+    # ── MFM reading ───────────────────────────────────────────────────────────
+    mfm_val    = fmt(ss("bg_mfm_kwh_total"), 0)
+
+    # ── Electricity consumed ──────────────────────────────────────────────────
+    elec_val   = fmt(ss("vpsa_kwh_total"), 0)
+
+    # ── Build rows ────────────────────────────────────────────────────────────
+    # Row 1: Gas Raw | Gas Pure | Purif Eff | CH₄ Pure | Digester Temp
+    # Row 2: Raw Material | Yield | Total CBG | MFM | Electricity
+
+    def _card(icon, label, value_html, unit="", opt_note=""):
+        opt_bar = f"<div style='font-size:.6rem;color:#2e7d32;margin-top:2px'>{opt_note}</div>" if opt_note else ""
+        return f"""
+<div class="kpi-card">
+  <div class="kpi-icon">{icon}</div>
+  <div class="kpi-value" style="font-size:1.25rem">{value_html}</div>
+  <div class="kpi-label">{label}{(' · ' + unit) if unit else ''}</div>
+  {opt_bar}
+</div>"""
+
+    row1 = [
+        ("🌿", "Avg Biogas Raw",
+         f"{fmt(sm('total_generated_gas'), 0)}", "m³/day", ""),
+        ("💨", "Avg Biogas Pure",
+         f"{fmt(sm('total_purified_gas'), 0)}", "m³/day", ""),
+        ("⚗",  "Purif. Eff.",
+         f"{fmt(sm('purif_efficiency'), 1)}", "%",
+         "✅ Optimal ≥ 95%" if not _math.isnan(sm("purif_efficiency")) and sm("purif_efficiency") >= 95
+         else "⚠ Target: ≥95%" if not _math.isnan(sm("purif_efficiency")) else ""),
+        ("✨", "Avg CH₄ Pure",
+         f"{fmt(sm('pure_ch4'), 1)}", "%",
+         "✅ Optimal ≥ 90%" if not _math.isnan(sm("pure_ch4")) and sm("pure_ch4") >= 90
+         else "⚠ Target: ≥90%" if not _math.isnan(sm("pure_ch4")) else ""),
+        ("🌡", "Avg Digester Temp",
+         f"{fmt(sm('digester_temp'), 1)}", "°C",
+         "✅ Mesophilic 35–40°C" if not _math.isnan(sm("digester_temp")) and 35 <= sm("digester_temp") <= 40
+         else "⚠ Target: 35–40°C" if not _math.isnan(sm("digester_temp")) else ""),
     ]
+    row2 = [
+        ("🐄🥔", "Raw Material",   rm_html,   "", ""),
+        ("📈",   "Biogas Yield",   yield_val, "m³/ton", ""),
+        ("🔥",   "Total CBG Sale", cbg_html,  "", ""),
+        ("📟",   "MFM Reading",    mfm_val,   "KWH", ""),
+        ("⚡",   "Electricity",    elec_val,  "KWH", ""),
+    ]
+
     if label_prefix:
         st.markdown(
             f"<div style='font-family:Space Mono,monospace;font-size:0.75rem;"
             f"color:#1a56db;font-weight:700;letter-spacing:.06em;"
             f"margin:6px 0 4px;'>🏭 {label_prefix.upper()}</div>",
             unsafe_allow_html=True)
-    r1 = st.columns(4); r2 = st.columns(4)
-    for i, (icon, label, value, unit) in enumerate(kpis):
-        col = (r1 if i < 4 else r2)[i % 4]
-        with col:
-            st.markdown(f"""
-<div class="kpi-card">
-  <div class="kpi-icon">{icon}</div>
-  <div class="kpi-value">{value}</div>
-  <div class="kpi-label">{label}&nbsp;·&nbsp;{unit}</div>
-</div>""", unsafe_allow_html=True)
+
+    r1_cols = st.columns(5)
+    for i, (icon, label, val, unit, opt) in enumerate(row1):
+        with r1_cols[i]:
+            st.markdown(_card(icon, label, val, unit, opt), unsafe_allow_html=True)
+
+    st.markdown("<div style='margin:6px 0'></div>", unsafe_allow_html=True)
+    r2_cols = st.columns(5)
+    for i, (icon, label, val, unit, opt) in enumerate(row2):
+        with r2_cols[i]:
+            st.markdown(_card(icon, label, val, unit, opt), unsafe_allow_html=True)
 
 
 def render_kpis(ops, all_data=None, selected=None, date_filter=None, view_mode="individual"):
@@ -916,67 +1067,66 @@ def tab_gas(ops, ma, xr):
         # ── Local MA override ─────────────────────────────────────────────────
         _ga, _gb = _cols2()
         with _ga:
-            ma = st.slider("📉 Moving-average window (days)", 1, 30,
+            ma = st.slider("📉 Rolling average window (days)", 1, 14,
                             st.session_state.get("ma_window", 7),
                             key="gas_ma_local",
-                            help="Faint line = raw daily data; bold = rolling mean.")
+                            help="Bars = daily values · Line = rolling mean. Click legend to hide/show.")
 
         c1,c2 = _cols2()
         with c1:
-            _pc(line_fig(ops,"date","total_generated_gas",
+            _pc(bar_line_fig(ops,"date","total_generated_gas",
                          "Raw Biogas Generated  [FM_final − FM_initial]",
-                         "m³/day",ma,xr=xr),"g1")
+                         "m³/day",ma,xr=xr),  "g1")
         with c2:
-            _pc(line_fig(ops,"date","total_purified_gas",
+            _pc(bar_line_fig(ops,"date","total_purified_gas",
                          "Purified Gas Output  [Purifier FM_final − FM_initial]",
-                         "m³/day",ma,xr=xr),"g2")
+                         "m³/day",ma,xr=xr),  "g2")
 
-        # CH₄ only — CO₂ traces removed (crowded the chart)
         c3,c4 = _cols2()
         with c3:
-            _pc(line_fig(ops,"date","raw_ch4",
+            _pc(bar_line_fig(ops,"date","raw_ch4",
                          "Raw Gas CH₄ (%)  [Inline analyser, raw side]",
-                         "%",ma,xr=xr),"g3")
+                         "%",ma,xr=xr, opt_low=55, opt_high=65),  "g3")
         with c4:
-            _pc(line_fig(ops,"date","pure_ch4",
+            _pc(bar_line_fig(ops,"date","pure_ch4",
                          "Purified Gas CH₄ (%)  [Inline analyser, pure side]",
-                         "%",ma,xr=xr),"g4")
+                         "%",ma,xr=xr, opt_low=90, opt_high=100),  "g4")
 
         sec("⚠ H₂S LEVELS (PPM)  ·  Thresholds hidden for readability")
         c5,c6 = _cols2()
         with c5:
-            _pc(line_fig(ops,"date","raw_h2s",
+            _pc(bar_line_fig(ops,"date","raw_h2s",
                          "Raw Gas H₂S (PPM)  [Inline analyser, raw side]",
-                         "PPM",ma,xr=xr),"g5")
+                         "PPM",ma,xr=xr),  "g5")
         with c6:
-            _pc(line_fig(ops,"date","pure_h2s",
+            _pc(bar_line_fig(ops,"date","pure_h2s",
                          "Purified Gas H₂S (PPM)  [Inline analyser, pure side]",
-                         "PPM",ma,xr=xr),"g6")
+                         "PPM",ma,xr=xr),  "g6")
 
         sec("⚗ PURIFICATION EFFICIENCY & BIOGAS RECOVERY")
         c9,c10 = _cols2()
         with c9:
-            fig=line_fig(ops,"date","purif_efficiency",
+            fig = bar_line_fig(ops,"date","purif_efficiency",
                           "Purification Efficiency (%)  [Purified Gas ÷ Raw Gas × 100]",
-                          "%",ma,xr=xr)
+                          "%",ma,xr=xr, opt_low=95, opt_high=100)
             fig.add_hline(y=95,line_dash="dot",line_color="#2e7d32",
                            annotation_text="Target 95%",annotation_font_color="#2e7d32")
             _pc(fig,"g9")
         with c10:
-            _pc(line_fig(ops,"date","bg_recovery",
+            _pc(bar_line_fig(ops,"date","bg_recovery",
                          "Biogas Recovery (%)  [Purified ÷ Total Generated × 100]",
-                         "%",ma,xr=xr),"g10")
+                         "%",ma,xr=xr),  "g10")
 
         sec("📉 GAS BALANCE")
         c7,c8 = _cols2()
         with c7:
-            _pc(line_fig(ops,"date","flare_m3",
+            _pc(bar_line_fig(ops,"date","flare_m3",
                          "Flare Gas  [Manual meter reading]",
-                         "m³",ma,xr=xr),"g7")
+                         "m³",ma,xr=xr),  "g7")
         with c8:
-            _pc(line_fig(ops,"date","gen_inlet_diff",
+            _pc(bar_line_fig(ops,"date","gen_inlet_diff",
                          "Gen–Inlet Differential  [Generator FM − Inlet FM]",
-                         "m³",ma,xr=xr),"g8")
+                         "m³",ma,xr=xr),  "g8")
     except Exception as e:
         st.error(f"Gas tab error: {e}")
 
@@ -985,22 +1135,23 @@ def tab_feed(ops, ma, xr):
     try:
         sec("🐄 FEEDSTOCK & FEEDING")
         c1,c2 = _cols2()
-        with c1: _pc(line_fig(ops,"date","dung_tons",
-                               "Dung Collected  [Weighbridge / manual]","tons/day",ma,xr=xr),"f1")
-        with c2: _pc(line_fig(ops,"date","total_feed_m3",
-                               "Total Feed to Reactor  [Flow Meter Final − Initial]","m³/day",ma,xr=xr),"f2")
+        with c1: _pc(bar_line_fig(ops,"date","dung_tons",
+                               "Dung Collected  [Weighbridge / manual]","tons/day",ma,xr=xr),  "f1")
+        with c2: _pc(bar_line_fig(ops,"date","total_feed_m3",
+                               "Total Feed to Reactor  [Flow Meter Final − Initial]","m³/day",ma,xr=xr),  "f2")
         c3,c4 = _cols2()
-        with c3: _pc(line_fig(ops,"date","total_filter_water",
-                               "Filter Water  [FM Final − FM Initial]","m³/day",ma,xr=xr),"f3")
+        with c3: _pc(bar_line_fig(ops,"date","total_filter_water",
+                               "Filter Water  [FM Final − FM Initial]","m³/day",ma,xr=xr),  "f3")
         with c4:
             if "waste_potato_tons" in ops.columns and ops["waste_potato_tons"].notna().any():
-                _pc(line_fig(ops,"date","waste_potato_tons","Waste Potato Added","tons/day",ma,xr=xr),"f4")
+                _pc(bar_line_fig(ops,"date","waste_potato_tons","Waste Potato Added","tons/day",ma,xr=xr),  "f4")
             else:
                 st.info("No waste-potato data for selected range.")
-        sec("📈 SPECIFIC BIOGAS YIELD  [Total Generated Gas (m³) ÷ Dung Collected (tons)]")
+        sec("📈 SPECIFIC BIOGAS YIELD  [Total Generated Gas (m³) ÷ Total Feedstock (tons)]")
         o2=ops.copy()
-        o2["yield_m3_per_ton"]=np.where(o2["dung_tons"]>0,o2["total_generated_gas"]/o2["dung_tons"],np.nan)
-        _pc(line_fig(o2,"date","yield_m3_per_ton","Biogas Yield (m³/ton dung)","m³/ton",ma,xr=xr),"f5")
+        feed_total = o2["dung_tons"].fillna(0) + (o2["waste_potato_tons"].fillna(0) if "waste_potato_tons" in o2.columns else 0)
+        o2["yield_m3_per_ton"]=np.where(feed_total>0, o2["total_generated_gas"]/feed_total, np.nan)
+        _pc(bar_line_fig(o2,"date","yield_m3_per_ton","Biogas Yield (m³/ton feedstock)","m³/ton",ma,xr=xr),  "f5")
     except Exception as e:
         st.error(f"Feed tab error: {e}")
 
@@ -1010,26 +1161,36 @@ def tab_purif(ops, ma, xr):
         sec("⚗ PURIFICATION & CBG SALES")
         c1,c2 = _cols2()
         with c1:
-            fig=line_fig(ops,"date","purif_efficiency",
+            fig=bar_line_fig(ops,"date","purif_efficiency",
                           "Purification Efficiency (%)  [Purified Gas ÷ Raw Gas × 100]",
-                          "%",ma,xr=xr)
+                          "%",ma,xr=xr, opt_low=95, opt_high=100)
             fig.add_hline(y=95,line_dash="dot",line_color="#2e7d32",annotation_text="Target 95%",annotation_font_color="#2e7d32")
             _pc(fig,"p1")
-        with c2: _pc(line_fig(ops,"date","bg_recovery",
+        with c2: _pc(bar_line_fig(ops,"date","bg_recovery",
                                "Biogas Recovery (%)  [Purified ÷ Total Generated × 100]",
-                               "%",ma,xr=xr),"p2")
+                               "%",ma,xr=xr),  "p2")
         c3,c4 = _cols2()
-        with c3: _pc(line_fig(ops,"date","cbg_sales_kg",
-                               "CBG Sales – Dispenser  [Dispenser mass flow meter]","kg/day",ma,xr=xr),"p3")
-        with c4: _pc(line_fig(ops,"date","total_sales_kg",
-                               "Total CBG Sales  [Dispenser + Cascade]","kg/day",ma,xr=xr),"p4")
+        with c3: _pc(bar_line_fig(ops,"date","cbg_sales_kg",
+                               "CBG Sales – Dispenser  [Dispenser mass flow meter]","kg/day",ma,xr=xr),  "p3")
+        with c4: _pc(bar_line_fig(ops,"date","total_sales_kg",
+                               "Total CBG Sales  [Dispenser + Cascade]","kg/day",ma,xr=xr),  "p4")
+        # Cascade separately if exists
+        if "cascade_sales_kg" in ops.columns and ops["cascade_sales_kg"].notna().any():
+            c5,c6 = _cols2()
+            with c5: _pc(bar_line_fig(ops,"date","cascade_sales_kg",
+                               "Cascade Sales  [Cascade FM]","kg/day",ma,xr=xr),  "p4b")
+            with c6: _pc(bar_line_fig(ops,"date","num_vehicles","Vehicles Served / Day","count",1,xr=xr),  "p6")
+        else:
+            _pc(bar_line_fig(ops,"date","num_vehicles","Vehicles Served / Day","count",1,xr=xr),  "p6")
+
         sec("📅 MONTHLY CBG SALES")
         monthly=(ops.assign(month=ops["date"].dt.to_period("M").astype(str))
-                    .groupby(["month","plant"],as_index=False)["cbg_sales_kg"].sum())
-        if not monthly.empty: _pc(bar_fig(monthly,"month","cbg_sales_kg","Monthly CBG Sales (kg)",height=440),"p5")
-        c5,c6 = _cols2()
-        with c5: _pc(line_fig(ops,"date","num_vehicles","Vehicles Served / Day","count",1,xr=xr),"p6")
-        with c6: _pc(line_fig(ops,"date","purif_running_hrs","Purification Running Hrs","hrs",1,xr=xr),"p7")
+                    .groupby(["month","plant"],as_index=False)[["cbg_sales_kg","cascade_sales_kg"]].sum())
+        if not monthly.empty:
+            _pc(bar_fig(monthly,"month","cbg_sales_kg","Monthly CBG Sales – Dispenser (kg)",height=400),"p5a")
+            if "cascade_sales_kg" in monthly.columns and monthly["cascade_sales_kg"].notna().any():
+                _pc(bar_fig(monthly,"month","cascade_sales_kg","Monthly CBG Sales – Cascade (kg)",height=400),"p5b")
+        _pc(bar_line_fig(ops,"date","purif_running_hrs","Purification Running Hrs","hrs",1,xr=xr),  "p7")
     except Exception as e:
         st.error(f"Purif tab error: {e}")
 
@@ -1038,22 +1199,22 @@ def tab_power(ops, ma, xr):
     try:
         sec("⚡ POWER & UTILITY CONSUMPTION")
         c1,c2 = _cols2()
-        with c1: _pc(line_fig(ops,"date","vpsa_kwh_total",
-                               "VPSA Power  [KWH meter Final − Initial]","KWH/day",ma,xr=xr),"pw1")
-        with c2: _pc(line_fig(ops,"date","bg_mfm_kwh_total",
-                               "Biogas MFM Power  [KWH meter Final − Initial]","KWH/day",ma,xr=xr),"pw2")
+        with c1: _pc(bar_line_fig(ops,"date","vpsa_kwh_total",
+                               "VPSA Power  [KWH meter Final − Initial]","KWH/day",ma,xr=xr),  "pw1")
+        with c2: _pc(bar_line_fig(ops,"date","bg_mfm_kwh_total",
+                               "Biogas MFM Power  [KWH meter Final − Initial]","KWH/day",ma,xr=xr),  "pw2")
         c3,c4 = _cols2()
-        with c3: _pc(line_fig(ops,"date","raw_water_m3",
-                               "Raw Water  [FM Final − FM Initial]","m³/day",ma,xr=xr),"pw3")
-        with c4: _pc(line_fig(ops,"date","poly_kg",
-                               "Poly Consumption  [Manual dosing log]","kg/day",ma,xr=xr),"pw4")
+        with c3: _pc(bar_line_fig(ops,"date","raw_water_m3",
+                               "Raw Water  [FM Final − FM Initial]","m³/day",ma,xr=xr),  "pw3")
+        with c4: _pc(bar_line_fig(ops,"date","poly_kg",
+                               "Poly Consumption  [Manual dosing log]","kg/day",ma,xr=xr),  "pw4")
         c5,c6 = _cols2()
-        with c5: _pc(line_fig(ops,"date","dg_hrs","DG Running Hours","hrs",1,xr=xr),"pw5")
-        with c6: _pc(line_fig(ops,"date","dg_diesel_l","DG Diesel Consumed","L/day",ma,xr=xr),"pw6")
+        with c5: _pc(bar_line_fig(ops,"date","dg_hrs","DG Running Hours","hrs",1,xr=xr),  "pw5")
+        with c6: _pc(bar_line_fig(ops,"date","dg_diesel_l","DG Diesel Consumed","L/day",ma,xr=xr),  "pw6")
         sec("💡 SPECIFIC ENERGY INTENSITY  [VPSA KWH ÷ Purified Gas (m³)]")
         o2=ops.copy()
         o2["kwh_per_m3"]=np.where(o2["total_purified_gas"]>0,o2["vpsa_kwh_total"]/o2["total_purified_gas"],np.nan)
-        _pc(line_fig(o2,"date","kwh_per_m3","VPSA Specific Energy (KWH/m³ purified)","KWH/m³",ma,xr=xr),"pw7")
+        _pc(bar_line_fig(o2,"date","kwh_per_m3","VPSA Specific Energy (KWH/m³ purified)","KWH/m³",ma,xr=xr),  "pw7")
     except Exception as e:
         st.error(f"Power tab error: {e}")
 
@@ -1063,24 +1224,29 @@ def tab_digester(ops, ma, xr):
         sec("🌡 DIGESTER CONDITIONS")
         c1,c2 = _cols2()
         with c1:
-            fig=line_fig(ops,"date","digester_temp",
-                          "Digester Temperature (°C)  [9–10 AM manual reading]","°C",ma,xr=xr)
+            fig=bar_line_fig(ops,"date","digester_temp",
+                          "Digester Temperature (°C)  [9–10 AM manual reading]","°C",ma,xr=xr,
+                          opt_low=35, opt_high=40)
             fig.add_hline(y=37,line_dash="dash",line_color="#c84b00",annotation_text="Mesophilic 37°C",annotation_font_color="#c84b00")
-            fig.add_hrect(y0=35,y1=40,fillcolor="#c84b00",opacity=0.05)
             _pc(fig,"d1")
         with c2:
-            fig=line_fig(ops,"date","digester_ph",
-                          "Digester pH  [9–10 AM manual / probe reading]","pH",ma,xr=xr)
-            fig.add_hrect(y0=6.8,y1=7.5,fillcolor="#2e7d32",opacity=0.07,annotation_text="Optimal 6.8–7.5",annotation_font_color="#2e7d32")
+            fig=bar_line_fig(ops,"date","digester_ph",
+                          "Digester pH  [9–10 AM manual / probe reading]","pH",ma,xr=xr,
+                          opt_low=6.8, opt_high=7.5)
             _pc(fig,"d2")
         sec("💧 DEWATERING  ·  Moisture (%) = (Wet – Dry) ÷ Wet × 100")
         c3,c4 = _cols2()
-        with c3: _pc(dual_fig(ops,"date","screw_moisture","Screw Press","volute_moisture","Volute Press","Dewatering Moisture (%)",xr=xr),"d3")
-        with c4: _pc(line_fig(ops,"date","flare_m3","Flare Gas  [Manual meter]","m³",ma,xr=xr),"d4")
+        with c3:
+            _pc(bar_line_fig(ops,"date","screw_moisture","Screw Press Moisture (%)","% ",ma,xr=xr),  "d3a")
+        with c4:
+            _pc(bar_line_fig(ops,"date","volute_moisture","Volute Press Moisture (%)","% ",ma,xr=xr),  "d3b")
+        c_extra,_ = _cols2()
+        with c_extra:
+            _pc(bar_line_fig(ops,"date","flare_m3","Flare Gas  [Manual meter]","m³",ma,xr=xr),  "d4")
         c5,c6,c7 = _cols3()
-        with c5: _pc(line_fig(ops,"date","screw_press_hrs","Screw Press Hrs","hrs",1,height=440,xr=xr),"d5")
-        with c6: _pc(line_fig(ops,"date","vibro_screen_hrs","Vibro Screen Hrs","hrs",1,height=440,xr=xr),"d6")
-        with c7: _pc(line_fig(ops,"date","volute_press_hrs","Volute Press Hrs","hrs",1,height=440,xr=xr),"d7")
+        with c5: _pc(bar_line_fig(ops,"date","screw_press_hrs","Screw Press Hrs","hrs",1,height=380,xr=xr),  "d5")
+        with c6: _pc(bar_line_fig(ops,"date","vibro_screen_hrs","Vibro Screen Hrs","hrs",1,height=380,xr=xr),  "d6")
+        with c7: _pc(bar_line_fig(ops,"date","volute_press_hrs","Volute Press Hrs","hrs",1,height=380,xr=xr),  "d7")
     except Exception as e:
         st.error(f"Digester tab error: {e}")
 
@@ -1261,6 +1427,151 @@ def tab_lab(all_data, selected, df_flt):
         with st.expander("Details"): st.code(traceback.format_exc())
 
 
+def tab_month_compare(all_data, selected, date_filter):
+    """Month vs Month comparison for the same plant — overlay daily trends."""
+    try:
+        sec("📅 MONTH vs MONTH COMPARISON  ·  Same plant, daily overlay")
+
+        plants_avail = [p for p in selected if p in all_data and not all_data[p]["ops"].empty]
+        if not plants_avail:
+            st.info("No plant data available."); return
+
+        ctrl_a, ctrl_b = st.columns([1, 3])
+        with ctrl_a:
+            plant_sel = st.selectbox("Plant", plants_avail, key="mvc_plant")
+        ops_full = all_data[plant_sel]["ops"].copy()
+        if ops_full.empty:
+            st.info(f"No data for {plant_sel}."); return
+
+        # Get all available months for this plant
+        all_months = sorted(ops_full["date"].dt.to_period("M").unique(), reverse=True)
+        all_month_str = [str(m) for m in all_months]
+        if len(all_month_str) < 2:
+            st.info("Need at least 2 months of data to compare."); return
+
+        with ctrl_b:
+            selected_months = st.multiselect(
+                "Select months to compare (max 6)",
+                all_month_str,
+                default=all_month_str[:2],
+                key="mvc_months",
+                max_selections=6,
+            )
+        if len(selected_months) < 2:
+            st.info("Select at least 2 months."); return
+
+        ma_mvc = st.slider("Rolling avg (days)", 1, 14, 7, key="mvc_ma")
+
+        # Metrics to compare
+        COMPARE_METRICS = [
+            ("total_generated_gas",  "Raw Biogas (m³/day)",         "m³",  None, None),
+            ("total_purified_gas",   "Purified Gas (m³/day)",        "m³",  None, None),
+            ("purif_efficiency",     "Purification Efficiency (%)",  "%",   95,   100),
+            ("cbg_sales_kg",         "CBG Sales – Dispenser (kg/d)", "kg",  None, None),
+            ("total_sales_kg",       "Total CBG Sales (kg/d)",       "kg",  None, None),
+            ("dung_tons",            "Dung Input (tons/day)",        "t",   None, None),
+            ("raw_ch4",              "Raw CH₄ (%)",                  "%",   55,   65),
+            ("pure_ch4",             "Purified CH₄ (%)",             "%",   90,   100),
+            ("digester_temp",        "Digester Temp (°C)",           "°C",  35,   40),
+            ("digester_ph",          "Digester pH",                  "pH",  6.8,  7.5),
+            ("vpsa_kwh_total",       "Electricity (KWH/day)",        "KWH", None, None),
+            ("bg_mfm_kwh_total",     "MFM Reading (KWH/day)",        "KWH", None, None),
+        ]
+
+        MVC_PALETTE = ["#1a56db","#c84b00","#2e7d32","#7b1fa2","#00838f","#b71c1c"]
+
+        for col, title, ylab, opt_lo, opt_hi in COMPARE_METRICS:
+            if col not in ops_full.columns:
+                continue
+            frames = []
+            for m_str in selected_months:
+                period = pd.Period(m_str, "M")
+                mdf = ops_full[ops_full["date"].dt.to_period("M") == period].copy()
+                mdf = mdf.dropna(subset=[col])
+                if mdf.empty:
+                    continue
+                # day-of-month as x-axis so months overlay
+                mdf["dom"] = mdf["date"].dt.day
+                mdf["month_label"] = m_str
+                frames.append(mdf[["dom", col, "month_label"]])
+            if not frames:
+                continue
+
+            all_m = pd.concat(frames, ignore_index=True)
+            if all_m[col].dropna().empty:
+                continue
+
+            fig = go.Figure()
+            for i, m_str in enumerate(selected_months):
+                mdata = all_m[all_m["month_label"] == m_str].sort_values("dom")
+                if mdata.empty:
+                    continue
+                c = MVC_PALETTE[i % len(MVC_PALETTE)]
+                s = mdata[col].astype(float)
+                # Bars
+                fig.add_trace(go.Bar(
+                    x=mdata["dom"], y=s,
+                    name=f"{m_str}",
+                    marker_color=_hex_rgba(c, 0.45),
+                    marker_line_width=0,
+                    legendgroup=m_str,
+                ))
+                # Rolling avg line
+                if len(mdata) >= 1:
+                    ma_w = max(1, min(ma_mvc, len(mdata)))
+                    fig.add_trace(go.Scatter(
+                        x=mdata["dom"],
+                        y=s.rolling(ma_w, min_periods=1).mean(),
+                        name=f"{m_str} avg",
+                        mode="lines",
+                        line=dict(color=c, width=2.4),
+                        legendgroup=m_str,
+                    ))
+
+            # Optimum band
+            if opt_lo is not None and opt_hi is not None:
+                fig.add_hrect(
+                    y0=opt_lo, y1=opt_hi,
+                    fillcolor="#2e7d32", opacity=0.06, line_width=0,
+                    annotation_text=f"Optimal {opt_lo}–{opt_hi}",
+                    annotation_font_color="#2e7d32", annotation_font_size=10,
+                )
+
+            fig.update_layout(
+                title=f"{title}  ·  {plant_sel}",
+                yaxis_title=ylab,
+                xaxis_title="Day of month",
+                barmode="overlay",
+                paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
+                font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=12),
+                title_font=dict(size=13, color="#1e2d45", family="Space Mono,monospace"),
+                legend=dict(orientation="h", yanchor="top", y=-0.18,
+                            xanchor="center", x=0.5,
+                            bgcolor="rgba(255,255,255,.9)",
+                            bordercolor="#dde6f4", borderwidth=1,
+                            font=dict(size=11, color=FONT_COLOR)),
+                height=400, title_x=0, margin=dict(l=10, r=10, t=44, b=80),
+                hovermode="x unified",
+            )
+            fig.update_xaxes(
+                tickmode="linear", dtick=1,
+                showgrid=True, gridcolor=CHART_GRID,
+                tickfont=dict(size=10, color=AXIS_COLOR),
+                title_font=dict(color=AXIS_COLOR),
+            )
+            fig.update_yaxes(
+                showgrid=True, gridcolor=CHART_GRID,
+                tickfont=dict(size=11, color=AXIS_COLOR),
+                title_font=dict(color=AXIS_COLOR),
+            )
+            st.plotly_chart(fig, use_container_width=True, key=f"mvc_{col}")
+
+    except Exception as e:
+        import traceback
+        st.error(f"Month comparison tab error: {e}")
+        with st.expander("Details"): st.code(traceback.format_exc())
+
+
 def tab_compare(all_data, selected, df_flt):
     try:
         sec("📊 CROSS-PLANT COMPARISON")
@@ -1319,7 +1630,7 @@ def tab_compare(all_data, selected, df_flt):
             ("pure_ch4","Purified CH₄ (%)  [Inline analyser, pure side]","%"),
         ]:
             if col in ops.columns and ops[col].notna().any():
-                _pc(line_fig(ops,"date",col,title,ylab,ma,xr=xr),"cmpov_"+col)
+                _pc(bar_line_fig(ops,"date",col,title,ylab,ma,xr=xr),"cmpov_"+col)
 
         # ── Lab sub-section: per-plant per-parameter, clearly separated ──────
         sec("🔬 LAB DATA COMPARISON  ·  Daily averages per plant & sample point")
@@ -1644,30 +1955,32 @@ def main():
     st.markdown("---")
 
     if view_mode == "compare" and len(selected) >= 2:
-        tabs = st.tabs(["📊 Compare","📊 Gas","🐄 Feedstock","⚗ Purification",
+        tabs = st.tabs(["📊 Compare","📅 Month vs Month","📊 Gas","🐄 Feedstock","⚗ Purification",
                          "⚡ Power","🌡 Digester","🔬 Lab","🚛 Dung Routes","🌱 Fertilizer","🗄 Raw Data"])
         with tabs[0]: tab_compare(all_data, selected, date_filter)
-        with tabs[1]: tab_gas(ops, ma, xr)
-        with tabs[2]: tab_feed(ops, ma, xr)
-        with tabs[3]: tab_purif(ops, ma, xr)
-        with tabs[4]: tab_power(ops, ma, xr)
-        with tabs[5]: tab_digester(ops, ma, xr)
-        with tabs[6]: tab_lab(all_data, selected, date_filter)
-        with tabs[7]: tab_dung(all_data, selected, date_filter)
-        with tabs[8]: tab_fert(all_data, selected)
-        with tabs[9]: tab_raw(ops, all_data, selected, date_filter)
+        with tabs[1]: tab_month_compare(all_data, selected, date_filter)
+        with tabs[2]: tab_gas(ops, ma, xr)
+        with tabs[3]: tab_feed(ops, ma, xr)
+        with tabs[4]: tab_purif(ops, ma, xr)
+        with tabs[5]: tab_power(ops, ma, xr)
+        with tabs[6]: tab_digester(ops, ma, xr)
+        with tabs[7]: tab_lab(all_data, selected, date_filter)
+        with tabs[8]: tab_dung(all_data, selected, date_filter)
+        with tabs[9]: tab_fert(all_data, selected)
+        with tabs[10]: tab_raw(ops, all_data, selected, date_filter)
     else:
         tabs = st.tabs(["📊 Gas","🐄 Feedstock","⚗ Purification","⚡ Power",
-                         "🌡 Digester","🔬 Lab","🚛 Dung Routes","🌱 Fertilizer","🗄 Raw Data"])
+                         "🌡 Digester","📅 Month vs Month","🔬 Lab","🚛 Dung Routes","🌱 Fertilizer","🗄 Raw Data"])
         with tabs[0]: tab_gas(ops, ma, xr)
         with tabs[1]: tab_feed(ops, ma, xr)
         with tabs[2]: tab_purif(ops, ma, xr)
         with tabs[3]: tab_power(ops, ma, xr)
         with tabs[4]: tab_digester(ops, ma, xr)
-        with tabs[5]: tab_lab(all_data, selected, date_filter)
-        with tabs[6]: tab_dung(all_data, selected, date_filter)
-        with tabs[7]: tab_fert(all_data, selected)
-        with tabs[8]: tab_raw(ops, all_data, selected, date_filter)
+        with tabs[5]: tab_month_compare(all_data, selected, date_filter)
+        with tabs[6]: tab_lab(all_data, selected, date_filter)
+        with tabs[7]: tab_dung(all_data, selected, date_filter)
+        with tabs[8]: tab_fert(all_data, selected)
+        with tabs[9]: tab_raw(ops, all_data, selected, date_filter)
 
 
 if __name__ == "__main__":
