@@ -968,21 +968,17 @@ def _kpi_cards(df, label_prefix=""):
     # ── Electricity consumed ──────────────────────────────────────────────────
     elec_val = fmt(ss("vpsa_kwh_total"), 0)
 
-    # ── Total gas generated in kg (avg per day + sum over period) ────────────
-    # Conversion: 1 m³ biogas ≈ 0.717 kg (at standard conditions)
-    M3_TO_KG = 0.717
-    gen_avg_m3  = sm("total_generated_gas")
-    gen_sum_m3  = ss("total_generated_gas")
-    gen_avg_kg  = gen_avg_m3 * M3_TO_KG  if not _math.isnan(gen_avg_m3) else float("nan")
-    gen_sum_kg  = gen_sum_m3 * M3_TO_KG  if not _math.isnan(gen_sum_m3) else float("nan")
+    # ── Total gas gen in kg — from Mass Flow Meter (bg_mfm_kwh_total) ─────────
+    mfm_avg  = sm("bg_mfm_kwh_total")
+    mfm_sum  = ss("bg_mfm_kwh_total")
     gen_kg_lines = []
-    if not _math.isnan(gen_avg_kg):
+    if not _math.isnan(mfm_avg):
         gen_kg_lines.append(
-            f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(gen_avg_kg, 0)}</span>"
-            f"<span style='font-size:.65rem;color:#5a7a9a'> kg/day</span>")
-    if not _math.isnan(gen_sum_kg):
+            f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(mfm_avg, 0)}</span>"
+            f"<span style='font-size:.65rem;color:#5a7a9a'> kg/day (MFM)</span>")
+    if not _math.isnan(mfm_sum):
         gen_kg_lines.append(
-            f"<span style='font-size:.78rem;color:#2e7d32'>{fmt(gen_sum_kg, 0)}</span>"
+            f"<span style='font-size:.78rem;color:#2e7d32'>{fmt(mfm_sum, 0)}</span>"
             f"<span style='font-size:.63rem;color:#5a7a9a'> kg total</span>")
     gen_kg_html = "<br>".join(gen_kg_lines) if gen_kg_lines else "–"
 
@@ -1069,12 +1065,141 @@ def render_kpis(ops, all_data=None, selected=None, date_filter=None, view_mode="
 
         # ── Yield per day chart (compare mode only) ───────────────────────────
         _render_yield_chart(all_data, selected, date_filter)
+        # ── MFM vs Expected gas comparison chart ──────────────────────────────
+        _render_mfm_vs_expected(all_data, selected, date_filter)
     else:
         _kpi_cards(ops)
         st.markdown("")
+        # ── MFM vs Expected gas comparison chart (single plant) ───────────────
+        _render_mfm_vs_expected(all_data, selected, date_filter)
 
 
-def _render_yield_chart(all_data, selected, date_filter):
+def _render_mfm_vs_expected(all_data, selected, date_filter):
+    """
+    Bar+line chart comparing MFM gas (bg_mfm_kwh_total, kg/day) vs
+    Expected Gas (expected_gas_kg, kg/day) per plant.
+    Also shows a running % deviation line on a secondary y-axis.
+    """
+    try:
+        cmap = _pmap(selected)
+        xr   = st.session_state.get("_xrange_cache")
+        ma   = st.session_state.get("ma_window", 7)
+        fig  = go.Figure()
+        has_any = False
+
+        for p in selected:
+            pdf = all_data.get(p, {}).get("ops", pd.DataFrame())
+            if pdf.empty:
+                continue
+            if date_filter:
+                pdf = _flt(pdf, date_filter)
+            if pdf.empty:
+                continue
+
+            has_mfm  = "bg_mfm_kwh_total" in pdf.columns and pdf["bg_mfm_kwh_total"].notna().any()
+            has_exp  = "expected_gas_kg"   in pdf.columns and pdf["expected_gas_kg"].notna().any()
+            if not (has_mfm or has_exp):
+                continue
+
+            c     = cmap[p]
+            c_dim = _hex_rgba(c, 0.35)
+            c_mid = _hex_rgba(c, 0.65)
+
+            # MFM bars
+            if has_mfm:
+                mfm_s = pdf["bg_mfm_kwh_total"]
+                fig.add_trace(go.Bar(
+                    x=pdf["date"], y=mfm_s,
+                    name=f"{p} — MFM (actual)",
+                    marker_color=c_mid,
+                    marker_line_width=0,
+                    legendgroup=p,
+                    yaxis="y1",
+                ))
+                valid_mfm = mfm_s.notna().sum()
+                if valid_mfm >= 1:
+                    fig.add_trace(go.Scatter(
+                        x=pdf["date"], y=_ma(mfm_s, max(1, min(ma, valid_mfm))),
+                        name=f"{p} MFM {ma}d avg",
+                        mode="lines",
+                        line=dict(color=c, width=2.2),
+                        legendgroup=p,
+                        yaxis="y1",
+                    ))
+
+            # Expected Gas line (dashed)
+            if has_exp:
+                exp_s = pdf["expected_gas_kg"]
+                fig.add_trace(go.Scatter(
+                    x=pdf["date"], y=exp_s,
+                    name=f"{p} — Expected (calc)",
+                    mode="lines",
+                    line=dict(color=c, width=2, dash="dot"),
+                    opacity=0.85,
+                    legendgroup=p,
+                    yaxis="y1",
+                ))
+
+            # Deviation % = (MFM − Expected) / Expected × 100  on secondary axis
+            if has_mfm and has_exp:
+                exp_safe = pdf["expected_gas_kg"].replace(0, float("nan"))
+                dev_s    = ((pdf["bg_mfm_kwh_total"] - exp_safe) / exp_safe * 100)
+                valid_dev = dev_s.notna().sum()
+                if valid_dev >= 1:
+                    fig.add_trace(go.Scatter(
+                        x=pdf["date"], y=dev_s,
+                        name=f"{p} — Deviation %",
+                        mode="lines+markers",
+                        marker=dict(size=4, color=c),
+                        line=dict(color=c, width=1.4, dash="longdash"),
+                        opacity=0.70,
+                        legendgroup=p,
+                        yaxis="y2",
+                    ))
+            has_any = True
+
+        if not has_any:
+            return
+
+        fig.update_layout(
+            title="Gas Mass — MFM (Actual) vs Expected (Calc)  [kg/day · Deviation % on right axis]",
+            barmode="group",
+            paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
+            font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=12),
+            legend=dict(orientation="h", yanchor="top", y=-0.22,
+                        xanchor="center", x=0.5, bgcolor="rgba(255,255,255,.9)",
+                        bordercolor="#dde6f4", borderwidth=1, font=dict(size=11, color=FONT_COLOR)),
+            hovermode="x unified", height=430, title_x=0,
+            title_font=dict(size=13, color="#1e2d45", family="Space Mono,monospace"),
+            margin=dict(l=10, r=60, t=44, b=100),
+            yaxis=dict(
+                title="kg/day",
+                showgrid=True, gridcolor=CHART_GRID, gridwidth=1,
+                zeroline=False, tickfont=dict(size=11, color=AXIS_COLOR),
+                title_font=dict(color=AXIS_COLOR),
+            ),
+            yaxis2=dict(
+                title="Deviation %",
+                overlaying="y", side="right",
+                showgrid=False,
+                zeroline=True, zerolinecolor="#f0c040", zerolinewidth=1.5,
+                tickfont=dict(size=11, color="#c84b00"),
+                title_font=dict(color="#c84b00"),
+            ),
+        )
+        xkw = dict(showgrid=True, gridcolor=CHART_GRID, gridwidth=1,
+                   zeroline=False, showline=True, linecolor="#dde6f4",
+                   tickfont=dict(size=11, color=AXIS_COLOR), tickcolor=AXIS_COLOR,
+                   title_font=dict(color=AXIS_COLOR), type="date", autorange=(xr is None))
+        if xr is not None:
+            xkw["range"] = xr
+        fig.update_xaxes(**xkw)
+        _pc(fig, "kpi_mfm_vs_expected")
+    except Exception as e:
+        st.warning(f"MFM vs Expected chart error: {e}")
+
+
+
     """Bar+line chart of daily biogas yield (m³/ton feedstock) for each plant."""
     try:
         cmap = _pmap(selected)
