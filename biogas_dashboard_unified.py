@@ -961,29 +961,20 @@ def _kpi_cards(df, label_prefix=""):
                              f"<span style='font-size:.63rem;color:#5a7a9a'> casc</span>")
     cbg_html = "<br>".join(cbg_lines) if cbg_lines else "–"
 
-    # ── Vehicles at pump (total) ──────────────────────────────────────────────
-    veh_total  = ss("num_vehicles")
-    veh_val    = fmt(veh_total, 0) if not _math.isnan(veh_total) else "–"
-
-    # ── Pure biogas produced (kg) — from cbg_mass_fm_kg if available,
-    #    else total_purified_gas × 0.717 kg/m³ (CBG density) ──────────────────
-    if "cbg_mass_fm_kg" in df.columns and df["cbg_mass_fm_kg"].notna().any():
-        pure_kg_val = fmt(ss("cbg_mass_fm_kg"), 0)
-        pure_kg_unit = "kg"
-    elif "total_purified_gas" in df.columns and df["total_purified_gas"].notna().any():
-        pure_kg_val = fmt(ss("total_purified_gas") * 0.717, 0)
-        pure_kg_unit = "kg (est.)"
-    else:
-        pure_kg_val = "–"
-        pure_kg_unit = "kg"
-
     # ── Gas flared total ──────────────────────────────────────────────────────
     flare_total = ss("flare_m3")
     flare_val   = fmt(flare_total, 0) if not _math.isnan(flare_total) else "–"
 
+    # ── Electricity consumed ──────────────────────────────────────────────────
+    elec_val = fmt(ss("vpsa_kwh_total"), 0)
+
+    # ── Total gas generated (sum over period) ─────────────────────────────────
+    total_gen_sum = ss("total_generated_gas")
+    total_gen_val = fmt(total_gen_sum, 0) if not _math.isnan(total_gen_sum) else "–"
+
     # ── Build rows ────────────────────────────────────────────────────────────
-    # Row 1: Gas Raw | Gas Pure | Purif Eff | CH₄ Pure | Vehicles at Pump
-    # Row 2: Raw Material | Yield | Total CBG | Pure Biogas (kg) | Gas Flared
+    # Row 1:  Dung/Potato | Raw Gas Gen (avg) | Gas Yield | Pure Gas Gen (avg) | Flare (total)
+    # Row 2:  Total Gas Gen (sum) | Vehicle+Cascade Sales | Purif Eff | CH₄% | Electricity
 
     def _card(icon, label, value_html, unit="", opt_note=""):
         opt_bar = f"<div style='font-size:.6rem;color:#2e7d32;margin-top:2px'>{opt_note}</div>" if opt_note else ""
@@ -996,27 +987,32 @@ def _kpi_cards(df, label_prefix=""):
 </div>"""
 
     row1 = [
-        ("🌿", "Avg Biogas Raw",
+        ("🐄🥔", "Raw Material",
+         rm_html, "", ""),
+        ("🌿",   "Raw Gas Gen",
          f"{fmt(sm('total_generated_gas'), 0)}", "m³/day", ""),
-        ("💨", "Avg Biogas Pure",
+        ("📈",   "Gas Yield",
+         yield_val, "m³/ton", ""),
+        ("💨",   "Pure Gas Gen",
          f"{fmt(sm('total_purified_gas'), 0)}", "m³/day", ""),
-        ("⚗",  "Purif. Eff.",
+        ("🔆",   "Gas Flared",
+         flare_val, "m³", ""),
+    ]
+    row2 = [
+        ("🌿",   "Total Gas Gen",
+         total_gen_val, "m³", ""),
+        ("🔥",   "Vehicle + Cascade Sales",
+         cbg_html, "", ""),
+        ("⚗",   "Purif. Eff.",
          f"{fmt(sm('purif_efficiency'), 1)}", "%",
          "✅ Optimal ≥ 95%" if not _math.isnan(sm("purif_efficiency")) and sm("purif_efficiency") >= 95
          else "⚠ Target: ≥95%" if not _math.isnan(sm("purif_efficiency")) else ""),
-        ("✨", "Avg CH₄ Pure",
+        ("✨",   "Avg CH₄ Pure",
          f"{fmt(sm('pure_ch4'), 1)}", "%",
          "✅ Optimal ≥ 90%" if not _math.isnan(sm("pure_ch4")) and sm("pure_ch4") >= 90
          else "⚠ Target: ≥90%" if not _math.isnan(sm("pure_ch4")) else ""),
-        ("🚗", "Vehicles at Pump",
-         veh_val, "total", ""),
-    ]
-    row2 = [
-        ("🐄🥔", "Raw Material",       rm_html,      "", ""),
-        ("📈",   "Biogas Yield",        yield_val,    "m³/ton", ""),
-        ("🔥",   "Total CBG Sale",      cbg_html,     "", ""),
-        ("💧",   "Pure Biogas Prod.",   pure_kg_val,  pure_kg_unit, ""),
-        ("🔆",   "Gas Flared",          flare_val,    "m³", ""),
+        ("⚡",   "Electricity",
+         elec_val, "KWH", ""),
     ]
 
     if label_prefix:
@@ -1056,9 +1052,88 @@ def render_kpis(ops, all_data=None, selected=None, date_filter=None, view_mode="
             else:
                 _kpi_cards(pdf, label_prefix=p)
             st.markdown("")
+
+        # ── Yield per day chart (compare mode only) ───────────────────────────
+        _render_yield_chart(all_data, selected, date_filter)
     else:
         _kpi_cards(ops)
         st.markdown("")
+
+
+def _render_yield_chart(all_data, selected, date_filter):
+    """Bar+line chart of daily biogas yield (m³/ton feedstock) for each plant."""
+    try:
+        cmap = _pmap(selected)
+        xr   = st.session_state.get("_xrange_cache")
+        ma   = st.session_state.get("ma_window", 7)
+        fig  = go.Figure()
+        has_any = False
+
+        for p in selected:
+            pdf = all_data.get(p, {}).get("ops", pd.DataFrame())
+            if pdf.empty:
+                continue
+            if date_filter:
+                pdf = _flt(pdf, date_filter)
+            if pdf.empty:
+                continue
+
+            feed = pdf["dung_tons"].fillna(0)
+            if "waste_potato_tons" in pdf.columns:
+                feed = feed + pdf["waste_potato_tons"].fillna(0)
+            mask = feed > 0
+            if not mask.any() or "total_generated_gas" not in pdf.columns:
+                continue
+
+            yield_s = (pdf.loc[mask, "total_generated_gas"] / feed[mask]).reindex(pdf.index)
+            c = cmap[p]
+            c_rgba = _hex_rgba(c, 0.72)
+
+            fig.add_trace(go.Bar(
+                x=pdf["date"], y=yield_s,
+                name=p,
+                marker_color=c_rgba,
+                showlegend=True,
+            ))
+            ma_line = _ma(yield_s, ma)
+            fig.add_trace(go.Scatter(
+                x=pdf["date"], y=ma_line,
+                name=f"{p} {ma}d avg",
+                mode="lines",
+                line=dict(color=c, width=2),
+                showlegend=True,
+            ))
+            has_any = True
+
+        if not has_any:
+            return
+
+        fig.update_layout(
+            title="Daily Biogas Yield  [Total Generated Gas ÷ Total Feed]",
+            barmode="group",
+            paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
+            font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=12),
+            legend=dict(orientation="h", yanchor="top", y=-0.18,
+                        xanchor="center", x=0.5, bgcolor="rgba(255,255,255,.9)",
+                        bordercolor="#dde6f4", borderwidth=1, font=dict(size=11, color=FONT_COLOR)),
+            hovermode="x unified", height=400, title_x=0,
+            title_font=dict(size=13, color="#1e2d45", family="Space Mono,monospace"),
+            margin=dict(l=10, r=10, t=44, b=80),
+            yaxis_title="m³/ton",
+        )
+        xkw = dict(showgrid=True, gridcolor=CHART_GRID, gridwidth=1,
+                   zeroline=False, showline=True, linecolor="#dde6f4",
+                   tickfont=dict(size=11, color=AXIS_COLOR), tickcolor=AXIS_COLOR,
+                   title_font=dict(color=AXIS_COLOR), type="date", autorange=(xr is None))
+        if xr is not None:
+            xkw["range"] = xr
+        fig.update_xaxes(**xkw)
+        fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID, gridwidth=1,
+                         zeroline=False, tickfont=dict(size=11, color=AXIS_COLOR),
+                         title_font=dict(color=AXIS_COLOR))
+        _pc(fig, "kpi_yield_compare")
+    except Exception as e:
+        st.warning(f"Yield chart error: {e}")
 
 
 # ── Tab helper: safe two-column layout ───────────────────────────────────────
