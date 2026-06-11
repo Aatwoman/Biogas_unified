@@ -39,7 +39,7 @@ warnings.filterwarnings("ignore")
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Biogas Plant Analytics",
+    page_title="Agthala & Bhukhala Biogas",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -774,7 +774,7 @@ def sidebar():
         st.markdown("""
 <div class="sb-header">
   <h2>⚡ BIOGAS ANALYTICS</h2>
-  <p>Unified Daily Report · Multi-Plant</p>
+  <p>🏭 Agthala &nbsp;·&nbsp; Bhukhala</p>
 </div>""", unsafe_allow_html=True)
 
         # Upload section
@@ -968,9 +968,23 @@ def _kpi_cards(df, label_prefix=""):
     # ── Electricity consumed ──────────────────────────────────────────────────
     elec_val = fmt(ss("vpsa_kwh_total"), 0)
 
-    # ── Total gas generated (sum over period) ─────────────────────────────────
-    total_gen_sum = ss("total_generated_gas")
-    total_gen_val = fmt(total_gen_sum, 0) if not _math.isnan(total_gen_sum) else "–"
+    # ── Total gas generated in kg (avg per day + sum over period) ────────────
+    # Conversion: 1 m³ biogas ≈ 0.717 kg (at standard conditions)
+    M3_TO_KG = 0.717
+    gen_avg_m3  = sm("total_generated_gas")
+    gen_sum_m3  = ss("total_generated_gas")
+    gen_avg_kg  = gen_avg_m3 * M3_TO_KG  if not _math.isnan(gen_avg_m3) else float("nan")
+    gen_sum_kg  = gen_sum_m3 * M3_TO_KG  if not _math.isnan(gen_sum_m3) else float("nan")
+    gen_kg_lines = []
+    if not _math.isnan(gen_avg_kg):
+        gen_kg_lines.append(
+            f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(gen_avg_kg, 0)}</span>"
+            f"<span style='font-size:.65rem;color:#5a7a9a'> kg/day</span>")
+    if not _math.isnan(gen_sum_kg):
+        gen_kg_lines.append(
+            f"<span style='font-size:.78rem;color:#2e7d32'>{fmt(gen_sum_kg, 0)}</span>"
+            f"<span style='font-size:.63rem;color:#5a7a9a'> kg total</span>")
+    gen_kg_html = "<br>".join(gen_kg_lines) if gen_kg_lines else "–"
 
     # ── Build rows ────────────────────────────────────────────────────────────
     # Row 1:  Dung/Potato | Raw Gas Gen (avg) | Gas Yield | Pure Gas Gen (avg) | Flare (total)
@@ -995,18 +1009,18 @@ def _kpi_cards(df, label_prefix=""):
          yield_val, "m³/ton", ""),
         ("💨",   "Pure Gas Gen",
          f"{fmt(sm('total_purified_gas'), 0)}", "m³/day", ""),
-        ("🔆",   "Gas Flared",
-         flare_val, "m³", ""),
-    ]
-    row2 = [
-        ("🌿",   "Total Gas Gen",
-         total_gen_val, "m³", ""),
-        ("🔥",   "Vehicle + Cascade Sales",
-         cbg_html, "", ""),
         ("⚗",   "Purif. Eff.",
          f"{fmt(sm('purif_efficiency'), 1)}", "%",
          "✅ Optimal ≥ 95%" if not _math.isnan(sm("purif_efficiency")) and sm("purif_efficiency") >= 95
          else "⚠ Target: ≥95%" if not _math.isnan(sm("purif_efficiency")) else ""),
+    ]
+    row2 = [
+        ("🔥",   "Total Gas Gen",
+         gen_kg_html, "", ""),
+        ("🚗",   "Vehicle + Cascade Sales",
+         cbg_html, "", ""),
+        ("🔆",   "Gas Flared",
+         flare_val, "m³", ""),
         ("✨",   "Avg CH₄ Pure",
          f"{fmt(sm('pure_ch4'), 1)}", "%",
          "✅ Optimal ≥ 90%" if not _math.isnan(sm("pure_ch4")) and sm("pure_ch4") >= 90
@@ -1991,7 +2005,7 @@ def main():
     all_data, selected, date_filter, view_mode = sidebar()
 
     if not all_data or not selected:
-        st.markdown("## ⚡ Biogas Plant Analytics Dashboard")
+        st.markdown("## ⚡ Agthala & Bhukhala Biogas Analytics")
         st.markdown("""
 **Getting started:**
 1. Upload one `.xlsx` per plant (Unified Daily Report format) in the sidebar.
@@ -2013,7 +2027,7 @@ def main():
     st.markdown(
         f"<h2 style='font-family:Space Mono,monospace;color:#1e2d45;"
         f"font-size:1.22rem;letter-spacing:.04em;margin-bottom:4px'>"
-        f"⚡ BIOGAS ANALYTICS &nbsp;"
+        f"⚡ AGTHALA &amp; BHUKHALA &nbsp;"
         f"<span style='font-size:.68rem;color:{mode_color}'>[{mode_label}]</span>"
         f"&nbsp;{badges}</h2>",
         unsafe_allow_html=True)
