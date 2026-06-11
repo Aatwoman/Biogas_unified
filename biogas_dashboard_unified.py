@@ -961,15 +961,29 @@ def _kpi_cards(df, label_prefix=""):
                              f"<span style='font-size:.63rem;color:#5a7a9a'> casc</span>")
     cbg_html = "<br>".join(cbg_lines) if cbg_lines else "–"
 
-    # ── MFM reading ───────────────────────────────────────────────────────────
-    mfm_val    = fmt(ss("bg_mfm_kwh_total"), 0)
+    # ── Vehicles at pump (total) ──────────────────────────────────────────────
+    veh_total  = ss("num_vehicles")
+    veh_val    = fmt(veh_total, 0) if not _math.isnan(veh_total) else "–"
 
-    # ── Electricity consumed ──────────────────────────────────────────────────
-    elec_val   = fmt(ss("vpsa_kwh_total"), 0)
+    # ── Pure biogas produced (kg) — from cbg_mass_fm_kg if available,
+    #    else total_purified_gas × 0.717 kg/m³ (CBG density) ──────────────────
+    if "cbg_mass_fm_kg" in df.columns and df["cbg_mass_fm_kg"].notna().any():
+        pure_kg_val = fmt(ss("cbg_mass_fm_kg"), 0)
+        pure_kg_unit = "kg"
+    elif "total_purified_gas" in df.columns and df["total_purified_gas"].notna().any():
+        pure_kg_val = fmt(ss("total_purified_gas") * 0.717, 0)
+        pure_kg_unit = "kg (est.)"
+    else:
+        pure_kg_val = "–"
+        pure_kg_unit = "kg"
+
+    # ── Gas flared total ──────────────────────────────────────────────────────
+    flare_total = ss("flare_m3")
+    flare_val   = fmt(flare_total, 0) if not _math.isnan(flare_total) else "–"
 
     # ── Build rows ────────────────────────────────────────────────────────────
-    # Row 1: Gas Raw | Gas Pure | Purif Eff | CH₄ Pure | Digester Temp
-    # Row 2: Raw Material | Yield | Total CBG | MFM | Electricity
+    # Row 1: Gas Raw | Gas Pure | Purif Eff | CH₄ Pure | Vehicles at Pump
+    # Row 2: Raw Material | Yield | Total CBG | Pure Biogas (kg) | Gas Flared
 
     def _card(icon, label, value_html, unit="", opt_note=""):
         opt_bar = f"<div style='font-size:.6rem;color:#2e7d32;margin-top:2px'>{opt_note}</div>" if opt_note else ""
@@ -994,17 +1008,15 @@ def _kpi_cards(df, label_prefix=""):
          f"{fmt(sm('pure_ch4'), 1)}", "%",
          "✅ Optimal ≥ 90%" if not _math.isnan(sm("pure_ch4")) and sm("pure_ch4") >= 90
          else "⚠ Target: ≥90%" if not _math.isnan(sm("pure_ch4")) else ""),
-        ("🌡", "Avg Digester Temp",
-         f"{fmt(sm('digester_temp'), 1)}", "°C",
-         "✅ Mesophilic 35–40°C" if not _math.isnan(sm("digester_temp")) and 35 <= sm("digester_temp") <= 40
-         else "⚠ Target: 35–40°C" if not _math.isnan(sm("digester_temp")) else ""),
+        ("🚗", "Vehicles at Pump",
+         veh_val, "total", ""),
     ]
     row2 = [
-        ("🐄🥔", "Raw Material",   rm_html,   "", ""),
-        ("📈",   "Biogas Yield",   yield_val, "m³/ton", ""),
-        ("🔥",   "Total CBG Sale", cbg_html,  "", ""),
-        ("📟",   "MFM Reading",    mfm_val,   "KWH", ""),
-        ("⚡",   "Electricity",    elec_val,  "KWH", ""),
+        ("🐄🥔", "Raw Material",       rm_html,      "", ""),
+        ("📈",   "Biogas Yield",        yield_val,    "m³/ton", ""),
+        ("🔥",   "Total CBG Sale",      cbg_html,     "", ""),
+        ("💧",   "Pure Biogas Prod.",   pure_kg_val,  pure_kg_unit, ""),
+        ("🔆",   "Gas Flared",          flare_val,    "m³", ""),
     ]
 
     if label_prefix:
