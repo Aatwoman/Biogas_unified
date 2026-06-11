@@ -259,6 +259,7 @@ SEEK = {
     "total_purified_gas":  ["total purified gas"],
     "expected_gas_kg":     ["expected gas"],
     "cbg_mass_fm_kg":      ["cbg mass fm"],
+    "mfm_gas_total":       ["mfm total","mfm gas total","total gas (mfm)","bg mfm total"],
     "pure_gas_purity_fm":  ["pure gas purity in fm","pure gas purity"],
     "cbg_sales_kg":        ["total cbg sales dispenser","total cbg sales"],
     "num_vehicles":        ["no. of vehicles","no of vehicles"],
@@ -304,6 +305,7 @@ COL_LABELS = {
     "pure_ch4":"Pure CH₄ (%)","pure_co2":"Pure CO₂ (%)","pure_h2s":"Pure H₂S (PPM)",
     "vpsa_kwh_total":"VPSA KWH Total","bg_mfm_kwh_total":"BG MFM KWH Total",
     "hp_comp_kwh_init":"HP Compressor KWH Init","hp_comp_kwh_final":"HP Compressor KWH Final",
+    "mfm_gas_total":"MFM Gas Total",
     "remarks":"Remarks",
 }
 
@@ -371,7 +373,7 @@ def _build_col_index(raw):
     header  = [str(v).replace("\n"," ").strip().lower() if pd.notna(v) else "" for v in raw.iloc[hdr_row]]
     section = [str(v).replace("\n"," ").strip().lower() if pd.notna(v) else "" for v in raw.iloc[sec_row]]
     idx = {}
-    skip = set(_SECOND.keys()) | {"vpsa_kwh_total","bg_mfm_kwh_total","hp_comp_kwh_init","hp_comp_kwh_final"}
+    skip = set(_SECOND.keys()) | {"vpsa_kwh_total","bg_mfm_kwh_total","hp_comp_kwh_init","hp_comp_kwh_final","mfm_gas_total"}
     for key, needles in SEEK.items():
         if key in skip: continue
         for needle in needles:
@@ -396,6 +398,15 @@ def _build_col_index(raw):
         h = header[c] if c < len(header) else ""
         if "initial" in h:   idx["hp_comp_kwh_init"]  = c
         elif "final" in h:   idx["hp_comp_kwh_final"] = c
+    # ── MFM gas total — try header needles first, fall back to col AL (idx 37) ─
+    _mfm_needles = ["mfm total","mfm gas total","total gas (mfm)","bg mfm total"]
+    for needle in _mfm_needles:
+        for c, h in enumerate(header):
+            if needle in h:
+                idx["mfm_gas_total"] = c; break
+        if "mfm_gas_total" in idx: break
+    if "mfm_gas_total" not in idx and len(header) > 37:
+        idx["mfm_gas_total"] = 37   # col AL positional fallback
     return idx
 
 
@@ -433,7 +444,7 @@ def load_daily_operations(wb_bytes, plant_name, fname=""):
     data = raw.iloc[ds:].reset_index(drop=True)
     del raw; gc.collect()  # free the full sheet immediately
     all_keys = list(SEEK.keys()) + list(_SECOND.keys()) + \
-               ["vpsa_kwh_total","bg_mfm_kwh_total","hp_comp_kwh_init","hp_comp_kwh_final"]
+               ["vpsa_kwh_total","bg_mfm_kwh_total","hp_comp_kwh_init","hp_comp_kwh_final","mfm_gas_total"]
     records = {}
     for key in all_keys:
         c = col_idx.get(key)
@@ -968,18 +979,18 @@ def _kpi_cards(df, label_prefix=""):
     # ── Electricity consumed ──────────────────────────────────────────────────
     elec_val = fmt(ss("vpsa_kwh_total"), 0)
 
-    # ── Total gas gen in kg — from Mass Flow Meter (bg_mfm_kwh_total) ─────────
-    mfm_avg  = sm("bg_mfm_kwh_total")
-    mfm_sum  = ss("bg_mfm_kwh_total")
+    # ── Total gas gen — Mass Flow Meter total (col AL / mfm_gas_total) ───────
+    mfm_sum  = ss("mfm_gas_total")
+    mfm_avg  = sm("mfm_gas_total")
     gen_kg_lines = []
     if not _math.isnan(mfm_avg):
         gen_kg_lines.append(
             f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(mfm_avg, 0)}</span>"
-            f"<span style='font-size:.65rem;color:#5a7a9a'> kg/day (MFM)</span>")
+            f"<span style='font-size:.65rem;color:#5a7a9a'> avg/day</span>")
     if not _math.isnan(mfm_sum):
         gen_kg_lines.append(
             f"<span style='font-size:.78rem;color:#2e7d32'>{fmt(mfm_sum, 0)}</span>"
-            f"<span style='font-size:.63rem;color:#5a7a9a'> kg total</span>")
+            f"<span style='font-size:.63rem;color:#5a7a9a'> total</span>")
     gen_kg_html = "<br>".join(gen_kg_lines) if gen_kg_lines else "–"
 
     # ── Build rows ────────────────────────────────────────────────────────────
