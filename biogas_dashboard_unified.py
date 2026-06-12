@@ -258,7 +258,7 @@ SEEK = {
     "gen_inlet_diff":      ["gen-inlet"],
     "total_purified_gas":  ["total purified gas"],
     "expected_gas_kg":     ["expected gas"],
-    "cbg_mass_fm_kg":      ["cbg mass fm (kg)","cbg mass fm"],
+    "cbg_mass_fm_kg":      ["cbg mass fm"],
     "mfm_gas_total":       ["mfm total","mfm gas total","total gas (mfm)","bg mfm total"],
     "pure_gas_purity_fm":  ["pure gas purity in fm","pure gas purity"],
     "cbg_sales_kg":        ["total cbg sales dispenser","total cbg sales"],
@@ -372,15 +372,25 @@ def _build_col_index(raw):
     sec_row, hdr_row = _find_header_rows(raw)
     header  = [str(v).replace("\n"," ").strip().lower() if pd.notna(v) else "" for v in raw.iloc[hdr_row]]
     section = [str(v).replace("\n"," ").strip().lower() if pd.notna(v) else "" for v in raw.iloc[sec_row]]
+    # Also read the row immediately below the header row — some sheets have a
+    # two-row header where section names (e.g. "GAS WEIGHT") are on hdr_row and
+    # sub-column labels (e.g. "CBG Mass FM (kg)") are on hdr_row+1.
+    sub_row = hdr_row + 1
+    subheader = ([str(v).replace("\n"," ").strip().lower() if pd.notna(v) else ""
+                  for v in raw.iloc[sub_row]]
+                 if sub_row < len(raw) else [])
     idx = {}
     skip = set(_SECOND.keys()) | {"vpsa_kwh_total","bg_mfm_kwh_total","hp_comp_kwh_init","hp_comp_kwh_final","mfm_gas_total"}
     for key, needles in SEEK.items():
         if key in skip: continue
         for needle in needles:
             nl = needle.lower()
-            for c, h in enumerate(header):
-                if nl in h:
-                    idx[key] = c; break
+            # search main header row first, then sub-header row
+            for row in (header, subheader):
+                for c, h in enumerate(row):
+                    if nl in h:
+                        idx[key] = c; break
+                if key in idx: break
             if key in idx: break
     for pk, needles in _SECOND.items():
         rk = pk.replace("pure_","raw_")
@@ -407,9 +417,14 @@ def _build_col_index(raw):
         if "mfm_gas_total" in idx: break
     if "mfm_gas_total" not in idx and len(header) > 37:
         idx["mfm_gas_total"] = 37   # col AL positional fallback
-    # ── cbg_mass_fm_kg positional fallback → col Z (idx 25) ──────────────────
+    # ── cbg_mass_fm_kg: if still not found via SEEK, scan subheader explicitly ─
+    if "cbg_mass_fm_kg" not in idx:
+        for c, h in enumerate(subheader):
+            if "cbg mass fm" in h:
+                idx["cbg_mass_fm_kg"] = c; break
+    # final positional fallback col Z (idx 25)
     if "cbg_mass_fm_kg" not in idx and len(header) > 25:
-        idx["cbg_mass_fm_kg"] = 25  # col Z positional fallback
+        idx["cbg_mass_fm_kg"] = 25
     return idx
 
 
@@ -982,7 +997,7 @@ def _kpi_cards(df, label_prefix=""):
     # ── Electricity consumed ──────────────────────────────────────────────────
     elec_val = fmt(ss("vpsa_kwh_total"), 0)
 
-    # ── Total gas gen — CBG Mass FM (kg) · col Z ─────────────────────────────
+    # ── Total gas gen — CBG Mass FM (kg) · sub-header col ────────────────────
     cbg_fm_sum = ss("cbg_mass_fm_kg")
     cbg_fm_avg = sm("cbg_mass_fm_kg")
     gen_kg_lines = []
