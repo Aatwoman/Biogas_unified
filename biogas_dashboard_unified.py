@@ -1046,12 +1046,47 @@ def _kpi_cards(df, label_prefix=""):
                              f"<span style='font-size:.76rem;color:#5a7a9a'> casc</span>")
     cbg_html = "<br>".join(cbg_lines) if cbg_lines else "–"
 
-    # ── Gas flared total ──────────────────────────────────────────────────────
-    flare_total = ss("flare_m3")
-    flare_val   = fmt(flare_total, 0) if not _math.isnan(flare_total) else "–"
+    # ── Gas flared — total + avg ──────────────────────────────────────────────
+    flare_sum   = ss("flare_m3")
+    flare_avg   = sm("flare_m3")
+    flare_lines = []
+    if not _math.isnan(flare_sum):
+        flare_lines.append(
+            f"<span style='font-size:1.1rem;font-weight:700;color:#c84b00'>{fmt(flare_sum, 0)}</span>"
+            f"<span style='font-size:.76rem;color:#5a7a9a'> m³ total</span>")
+    if not _math.isnan(flare_avg) and flare_avg > 0:
+        flare_lines.append(
+            f"<span style='font-size:.9rem;color:#c84b00'>{fmt(flare_avg, 0)}</span>"
+            f"<span style='font-size:.74rem;color:#5a7a9a'> m³/day avg</span>")
+    flare_html = "<br>".join(flare_lines) if flare_lines else "–"
 
-    # ── Electricity consumed ──────────────────────────────────────────────────
-    elec_val = fmt(ss("vpsa_kwh_total"), 0)
+    # ── Electricity — total + avg ─────────────────────────────────────────────
+    elec_sum   = ss("vpsa_kwh_total")
+    elec_avg   = sm("vpsa_kwh_total")
+    elec_lines = []
+    if not _math.isnan(elec_sum):
+        elec_lines.append(
+            f"<span style='font-size:1.1rem;font-weight:700;color:#1a56db'>{fmt(elec_sum, 0)}</span>"
+            f"<span style='font-size:.76rem;color:#5a7a9a'> KWH total</span>")
+    if not _math.isnan(elec_avg) and elec_avg > 0:
+        elec_lines.append(
+            f"<span style='font-size:.9rem;color:#1a56db'>{fmt(elec_avg, 0)}</span>"
+            f"<span style='font-size:.74rem;color:#5a7a9a'> KWH/day avg</span>")
+    elec_html = "<br>".join(elec_lines) if elec_lines else "–"
+
+    # ── Diesel — total + avg ──────────────────────────────────────────────────
+    diesel_sum   = ss("dg_diesel_l")
+    diesel_avg   = sm("dg_diesel_l")
+    diesel_lines = []
+    if not _math.isnan(diesel_sum):
+        diesel_lines.append(
+            f"<span style='font-size:1.1rem;font-weight:700;color:#7b1fa2'>{fmt(diesel_sum, 0)}</span>"
+            f"<span style='font-size:.76rem;color:#5a7a9a'> L total</span>")
+    if not _math.isnan(diesel_avg) and diesel_avg > 0:
+        diesel_lines.append(
+            f"<span style='font-size:.9rem;color:#7b1fa2'>{fmt(diesel_avg, 1)}</span>"
+            f"<span style='font-size:.74rem;color:#5a7a9a'> L/day avg</span>")
+    diesel_html = "<br>".join(diesel_lines) if diesel_lines else "–"
 
     # ── Total gas gen — CBG Mass FM (actual) + Expected Gas ─────────────────
     cbg_fm_sum  = ss("cbg_mass_fm_kg")
@@ -1143,15 +1178,15 @@ def _kpi_cards(df, label_prefix=""):
         ("🚗",   "Vehicle + Cascade Sales",
          cbg_html, "", ""),
         ("🔆",   "Gas Flared",
-         flare_val, "m³", ""),
+         flare_html, "", ""),
         ("✨",   "Avg CH₄ Pure",
          f"{fmt(sm('pure_ch4'), 1)}", "%",
          "✅ Optimal ≥ 95%" if not _math.isnan(sm("pure_ch4")) and sm("pure_ch4") >= 95
          else "⚠ Target: ≥95%" if not _math.isnan(sm("pure_ch4")) else ""),
         ("⚡",   "Electricity",
-         elec_val, "KWH", ""),
-        ("📡",   "MFM Reading",
-         fmt(ss("bg_mfm_kwh_total"), 0), "KWH total", ""),
+         elec_html, "", ""),
+        ("⛽",   "Diesel Consumed",
+         diesel_html, "", ""),
     ]
 
     if label_prefix:
