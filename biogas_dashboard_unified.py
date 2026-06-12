@@ -430,6 +430,15 @@ def _build_col_index(raw):
 
 def _to_num(s):
     if not isinstance(s, pd.Series): return pd.Series(dtype=float)
+    # Strip trailing unit suffixes entered in Excel cells (e.g. "1468kg", "0kg", "37.5m³")
+    # Handles both object dtype and pandas StringDtype (dtype.name == "str" / "string").
+    import re as _re
+    _unit_pat = _re.compile(r'(?<=[\d.])[a-zA-Z\u00b3\u00b0%\s]+$')
+    _needs_clean = s.dtype == object or str(s.dtype) in ("string", "str")
+    if _needs_clean:
+        s = s.astype(object).apply(
+            lambda v: _unit_pat.sub('', str(v).strip()) if pd.notna(v) else v
+        )
     return pd.to_numeric(s, errors="coerce")
 
 
