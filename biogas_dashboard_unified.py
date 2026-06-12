@@ -714,18 +714,42 @@ def dual_fig(df, x, ca, la, cb, lb, title, height=500, xr=None):
     return _base(fig, height, xr)
 
 
-def bar_fig(df, x, y, title, color="plant", height=460):
+def bar_fig(df, x, y, title, color="plant", height=480):
+    """Grouped bar chart with value labels on top of each bar."""
     cmap = _pmap(df["plant"].unique()) if "plant" in df.columns else {}
     fig = px.bar(df, x=x, y=y, color=color, barmode="group",
-                 title=title, color_discrete_map=cmap)
-    fig.update_traces(marker_line_width=0)
-    fig.update_layout(paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
-                      font=dict(color=FONT_COLOR,family="Inter,sans-serif"),
-                      title_font=dict(size=13,color="#1e2d45",family="Space Mono,monospace"),
-                      legend=dict(orientation="h",yanchor="top",y=-0.18,xanchor="center",x=0.5,
-                                  bgcolor="rgba(255,255,255,.9)",bordercolor="#dde6f4",
-                                  borderwidth=1,font=dict(color=FONT_COLOR)),
-                      height=height, title_x=0, margin=dict(l=10,r=10,t=44,b=80))
+                 title=title, color_discrete_map=cmap,
+                 text=y)
+    # Format text labels: use compact notation
+    def _fmt_val(v):
+        if v is None: return ""
+        try:
+            v = float(v)
+            if abs(v) >= 1_000_000: return f"{v/1_000_000:.1f}M"
+            if abs(v) >= 1_000:     return f"{v/1_000:.1f}k"
+            if abs(v) >= 10:        return f"{v:,.0f}"
+            return f"{v:.2f}"
+        except Exception: return str(v)
+    fig.update_traces(
+        marker_line_width=0,
+        texttemplate="%{text:.3s}",
+        textposition="outside",
+        textfont=dict(size=10, color=FONT_COLOR),
+        cliponaxis=False,
+    )
+    # Add some top margin so labels don't get clipped
+    y_vals = df[y].dropna()
+    y_max = y_vals.max() if not y_vals.empty else 1
+    fig.update_layout(
+        paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
+        font=dict(color=FONT_COLOR,family="Inter,sans-serif"),
+        title_font=dict(size=13,color="#1e2d45",family="Space Mono,monospace"),
+        legend=dict(orientation="h",yanchor="top",y=-0.18,xanchor="center",x=0.5,
+                    bgcolor="rgba(255,255,255,.9)",bordercolor="#dde6f4",
+                    borderwidth=1,font=dict(color=FONT_COLOR)),
+        height=height, title_x=0, margin=dict(l=10,r=10,t=44,b=80),
+        yaxis_range=[0, y_max * 1.18],   # 18% headroom for labels
+    )
     fig.update_xaxes(showgrid=False,linecolor="#dde6f4",tickfont=dict(color=AXIS_COLOR))
     fig.update_yaxes(showgrid=True,gridcolor=CHART_GRID,tickfont=dict(color=AXIS_COLOR))
     return fig
@@ -2319,6 +2343,237 @@ def tab_raw(ops, all_data, selected, df_flt):
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+def tab_kpi_page(ops, all_data, selected, date_filter):
+    """
+    Full KPI page — one stat card per parameter, ~38 metrics, grouped by category.
+    Shows avg/day, total/period, min, max, and a trend spark-indicator for each plant.
+    """
+    import math as _m
+
+    if ops.empty:
+        st.info("No operational data for the selected range."); return
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+    def _sm(df, c): return df[c].dropna().mean()  if c in df.columns else float("nan")
+    def _ss(df, c): return df[c].dropna().sum()   if c in df.columns else float("nan")
+    def _smin(df,c): return df[c].dropna().min()  if c in df.columns else float("nan")
+    def _smax(df,c): return df[c].dropna().max()  if c in df.columns else float("nan")
+    def _smed(df,c): return df[c].dropna().median() if c in df.columns else float("nan")
+
+    def _fmt(v, dec=1):
+        if isinstance(v, float) and _m.isnan(v): return "–"
+        if abs(v) >= 1_000_000: return f"{v/1_000_000:.2f}M"
+        if abs(v) >= 10_000:    return f"{v:,.0f}"
+        if abs(v) >= 1_000:     return f"{v:,.1f}"
+        return f"{v:.{dec}f}"
+
+    def _trend_arrow(df, col):
+        """Compare first-half avg vs second-half avg → ▲ / ▼ / ─"""
+        if col not in df.columns: return "─", "#8aaac8"
+        s = df[col].dropna()
+        if len(s) < 6: return "─", "#8aaac8"
+        mid = len(s) // 2
+        f_avg, s_avg = s.iloc[:mid].mean(), s.iloc[mid:].mean()
+        if s_avg > f_avg * 1.02: return "▲", "#2e7d32"
+        if s_avg < f_avg * 0.98: return "▼", "#b71c1c"
+        return "─", "#8aaac8"
+
+    def _opt_badge(avg, opt_lo, opt_hi):
+        if _m.isnan(avg): return ""
+        if opt_lo is not None and opt_hi is not None:
+            ok = opt_lo <= avg <= opt_hi
+            return ("✅" if ok else "⚠") + f" {opt_lo}–{opt_hi}"
+        return ""
+
+    def _kpi_stat_card(icon, label, unit, avg, total, mn, mx, trend_sym, trend_col,
+                       opt_note="", prefix="", show_total=True, dec=1):
+        total_line = ""
+        if show_total and not _m.isnan(total):
+            total_line = (f"<div style='font-size:.68rem;color:#5a7a9a;margin-top:1px'>"
+                          f"Σ {_fmt(total, dec)} {unit}</div>")
+        minmax = ""
+        if not _m.isnan(mn) and not _m.isnan(mx):
+            minmax = (f"<div style='font-size:.63rem;color:#8aaac8;margin-top:1px'>"
+                      f"min {_fmt(mn,dec)} · max {_fmt(mx,dec)}</div>")
+        opt_html = (f"<div style='font-size:.62rem;color:#2e7d32;margin-top:2px'>{opt_note}</div>"
+                    if opt_note else "")
+        avg_disp = _fmt(avg, dec) if not _m.isnan(avg) else "–"
+        return f"""
+<div class="kpi-card" style="min-width:140px">
+  <div style="font-size:.95rem;margin-bottom:3px">{icon}</div>
+  <div style="font-size:1.22rem;font-weight:700;color:#1a56db;font-family:'Space Mono',monospace;line-height:1.1">{avg_disp}</div>
+  <div style="font-size:.61rem;color:#5a7a9a;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">{label}</div>
+  <div style="font-size:.65rem;color:#7a96b2">{unit}/day avg &nbsp;<span style="color:{trend_col};font-weight:700">{trend_sym}</span></div>
+  {total_line}{minmax}{opt_html}
+</div>"""
+
+    # ── per-plant dfs ─────────────────────────────────────────────────────────
+    plant_dfs = {}
+    for p in selected:
+        pdf = all_data.get(p, {}).get("ops", pd.DataFrame())
+        if not pdf.empty and date_filter:
+            pdf = _flt(pdf, date_filter)
+        if not pdf.empty:
+            plant_dfs[p] = pdf
+
+    if not plant_dfs:
+        st.warning("No data."); return
+
+    plants = list(plant_dfs.keys())
+    n_plants = len(plants)
+
+    # ── derived columns ───────────────────────────────────────────────────────
+    for p, pdf in plant_dfs.items():
+        feed = pdf["dung_tons"].fillna(0) + (pdf["waste_potato_tons"].fillna(0)
+               if "waste_potato_tons" in pdf.columns else 0)
+        pdf["_feed_total"] = feed
+        mask = feed > 0
+        if "total_generated_gas" in pdf.columns:
+            pdf["_raw_yield"] = np.where(mask, pdf["total_generated_gas"] / feed, np.nan)
+        if "total_purified_gas" in pdf.columns:
+            pdf["_pure_yield"] = np.where(mask, pdf["total_purified_gas"] / feed, np.nan)
+        if "vpsa_kwh_total" in pdf.columns and "total_purified_gas" in pdf.columns:
+            pdf["_kwh_per_m3"] = np.where(pdf["total_purified_gas"] > 0,
+                                           pdf["vpsa_kwh_total"] / pdf["total_purified_gas"], np.nan)
+
+    # ── KPI definitions ───────────────────────────────────────────────────────
+    # (icon, label, col, unit, show_total, dec, opt_lo, opt_hi)
+    GROUPS = [
+        ("🐄 FEEDSTOCK", [
+            ("🐄", "Dung Collected",        "dung_tons",          "tons", True,  1, None, None),
+            ("🥔", "Waste Potato",           "waste_potato_tons",  "tons", True,  1, None, None),
+            ("🪣", "Total Feed to Reactor",  "total_feed_m3",      "m³",   True,  0, None, None),
+            ("💧", "Filter Water",           "total_filter_water", "m³",   True,  0, None, None),
+        ]),
+        ("⛽ RAW GAS GENERATION", [
+            ("🌿", "Total Generated Gas",   "total_generated_gas", "m³",   True, 0, None, None),
+            ("🔀", "Total Raw Gas (Inlet)", "total_raw_gas",        "m³",   True, 0, None, None),
+            ("↕",  "Gen–Inlet Differential","gen_inlet_diff",       "m³",   True, 0, None, None),
+            ("🔥", "Flare Gas",             "flare_m3",             "m³",   True, 0, None, None),
+        ]),
+        ("🔬 GAS COMPOSITION — RAW", [
+            ("🧪", "Raw CH₄",  "raw_ch4",  "%",   False, 1, 55, 65),
+            ("🧪", "Raw CO₂",  "raw_co2",  "%",   False, 1, None, None),
+            ("🧪", "Raw O₂",   "raw_o2",   "%",   False, 2, None, None),
+            ("🧪", "Raw H₂S",  "raw_h2s",  "PPM", False, 0, None, None),
+        ]),
+        ("💨 PURIFIED GAS", [
+            ("💨", "Total Purified Gas",    "total_purified_gas",  "m³",   True, 0, None, None),
+            ("⚗",  "Purif. Efficiency",    "purif_efficiency",    "%",    False, 1, 95, 100),
+            ("♻",  "BG Recovery",          "bg_recovery",         "%",    False, 1, None, None),
+            ("📡", "Pure Gas Purity FM",   "pure_gas_purity_fm",  "%",    False, 1, 97, 100),
+        ]),
+        ("🔬 GAS COMPOSITION — PURE", [
+            ("✨", "Pure CH₄",  "pure_ch4",  "%",   False, 1, 90, 100),
+            ("✨", "Pure CO₂",  "pure_co2",  "%",   False, 1, None, None),
+            ("✨", "Pure H₂S",  "pure_h2s",  "PPM", False, 0, None, None),
+        ]),
+        ("⚖ GAS WEIGHT (kg)", [
+            ("⚖", "CBG Mass FM (Actual)",  "cbg_mass_fm_kg",   "kg", True, 0, None, None),
+            ("📋", "Expected Gas",          "expected_gas_kg",  "kg", True, 0, None, None),
+            ("🛒", "CBG Sales Dispenser",   "cbg_sales_kg",     "kg", True, 0, None, None),
+            ("🚚", "Cascade Sales",         "cascade_sales_kg", "kg", True, 0, None, None),
+            ("📦", "Total CBG Sales",       "total_sales_kg",   "kg", True, 0, None, None),
+            ("🚗", "Vehicles Served",       "num_vehicles",     "#",  True, 0, None, None),
+        ]),
+        ("📈 YIELD", [
+            ("📈", "Raw Gas Yield",      "_raw_yield",  "m³/t", False, 1, None, None),
+            ("📈", "Purified Gas Yield", "_pure_yield", "m³/t", False, 1, None, None),
+        ]),
+        ("⚡ POWER & UTILITIES", [
+            ("⚡", "VPSA Power",       "vpsa_kwh_total",    "KWH", True, 0, None, None),
+            ("📡", "MFM KWH",         "bg_mfm_kwh_total",  "KWH", True, 0, None, None),
+            ("💡", "VPSA Spec. Energy","_kwh_per_m3",       "KWH/m³", False, 2, None, None),
+            ("💧", "Raw Water",        "raw_water_m3",      "m³",  True, 0, None, None),
+            ("🧴", "Poly Consumption", "poly_kg",           "kg",  True, 1, None, None),
+            ("🔋", "DG Running Hrs",   "dg_hrs",            "hrs", True, 1, None, None),
+            ("⛽", "DG Diesel",        "dg_diesel_l",       "L",   True, 0, None, None),
+        ]),
+        ("🌡 DIGESTER", [
+            ("🌡", "Digester Temp",    "digester_temp",   "°C",  False, 1, 35, 40),
+            ("⚗",  "Digester pH",     "digester_ph",     "pH",  False, 2, 6.8, 7.5),
+            ("💧", "Screw Moisture",   "screw_moisture",  "%",   False, 1, None, None),
+            ("💧", "Volute Moisture",  "volute_moisture", "%",   False, 1, None, None),
+        ]),
+        ("⏱ RUNNING HOURS", [
+            ("⏱", "Purif. Running Hrs",  "purif_running_hrs", "hrs", True, 1, None, None),
+            ("⏱", "Compressor Hrs",      "compressor_hrs",    "hrs", True, 1, None, None),
+            ("⏱", "Screw Press Hrs",     "screw_press_hrs",   "hrs", True, 1, None, None),
+            ("⏱", "Vibro Screen Hrs",    "vibro_screen_hrs",  "hrs", True, 1, None, None),
+            ("⏱", "Volute Press Hrs",    "volute_press_hrs",  "hrs", True, 1, None, None),
+        ]),
+    ]
+
+    # ── render ────────────────────────────────────────────────────────────────
+    # Plant selector pill at top for multi-plant
+    if n_plants > 1:
+        kpi_p_sel = st.radio(
+            "Plant", plants, horizontal=True, key="kpi_page_plant",
+            format_func=lambda x: f"🏭 {x}",
+        )
+        render_plants = [kpi_p_sel]
+    else:
+        render_plants = plants
+
+    # Period summary line
+    if date_filter:
+        s_str = date_filter["start"].strftime("%d %b %Y")
+        e_str = date_filter["end"].strftime("%d %b %Y")
+        n_days = (date_filter["end"] - date_filter["start"]).days + 1
+        st.markdown(
+            f"<div class='mode-banner'>📅 <strong>{s_str}</strong> → <strong>{e_str}</strong>"
+            f" &nbsp;·&nbsp; <strong>{n_days}</strong> days in period</div>",
+            unsafe_allow_html=True)
+
+    for rp in render_plants:
+        pdf = plant_dfs.get(rp, pd.DataFrame())
+        if pdf.empty: continue
+
+        if n_plants > 1:
+            st.markdown(
+                f"<div style='font-family:Space Mono,monospace;font-size:.78rem;"
+                f"font-weight:700;color:#1a56db;margin:10px 0 4px'>🏭 {rp.upper()}</div>",
+                unsafe_allow_html=True)
+
+        for grp_label, params in GROUPS:
+            # Check if any param in this group has data
+            has_any = any(
+                (col in pdf.columns and pdf[col].dropna().any()) or
+                (col.startswith("_") and col in pdf.columns and pdf[col].dropna().any())
+                for _, _, col, *_ in params
+            )
+            if not has_any:
+                continue
+
+            st.markdown(f'<div class="sec-hdr">{grp_label}</div>', unsafe_allow_html=True)
+
+            # Render cards in rows of 5
+            row_cards = []
+            for (icon, lbl, col, unit, show_total, dec, opt_lo, opt_hi) in params:
+                avg  = _sm(pdf, col)
+                tot  = _ss(pdf, col) if show_total else float("nan")
+                mn   = _smin(pdf, col)
+                mx   = _smax(pdf, col)
+                sym, tcol = _trend_arrow(pdf, col)
+                opt  = _opt_badge(avg, opt_lo, opt_hi)
+                row_cards.append(_kpi_stat_card(
+                    icon, lbl, unit, avg, tot, mn, mx, sym, tcol,
+                    opt_note=opt, show_total=show_total, dec=dec
+                ))
+
+            # Chunk into rows of 5
+            COLS = 5
+            for i in range(0, len(row_cards), COLS):
+                chunk = row_cards[i:i+COLS]
+                cols = st.columns(len(chunk))
+                for j, card_html in enumerate(chunk):
+                    with cols[j]:
+                        st.markdown(card_html, unsafe_allow_html=True)
+                st.markdown("<div style='margin:4px 0'></div>", unsafe_allow_html=True)
+
+        st.markdown("---")
+
+
 def main():
     all_data, selected, date_filter, view_mode = sidebar()
 
@@ -2375,7 +2630,8 @@ def main():
 
     if view_mode == "compare" and len(selected) >= 2:
         tabs = st.tabs(["📊 Compare","📅 Month vs Month","📊 Gas","🐄 Feedstock","⚗ Purification",
-                         "⚡ Power","🌡 Digester","🔬 Lab","🚛 Dung Routes","🌱 Fertilizer","🗄 Raw Data"])
+                         "⚡ Power","🌡 Digester","🔬 Lab","🚛 Dung Routes","🌱 Fertilizer",
+                         "📋 All KPIs","🗄 Raw Data"])
         with tabs[0]: tab_compare(all_data, selected, date_filter)
         with tabs[1]: tab_month_compare(all_data, selected, date_filter)
         with tabs[2]: tab_gas(ops, ma, xr)
@@ -2386,10 +2642,12 @@ def main():
         with tabs[7]: tab_lab(all_data, selected, date_filter)
         with tabs[8]: tab_dung(all_data, selected, date_filter)
         with tabs[9]: tab_fert(all_data, selected)
-        with tabs[10]: tab_raw(ops, all_data, selected, date_filter)
+        with tabs[10]: tab_kpi_page(ops, all_data, selected, date_filter)
+        with tabs[11]: tab_raw(ops, all_data, selected, date_filter)
     else:
         tabs = st.tabs(["📊 Gas","🐄 Feedstock","⚗ Purification","⚡ Power",
-                         "🌡 Digester","📅 Month vs Month","🔬 Lab","🚛 Dung Routes","🌱 Fertilizer","🗄 Raw Data"])
+                         "🌡 Digester","📅 Month vs Month","🔬 Lab","🚛 Dung Routes",
+                         "🌱 Fertilizer","📋 All KPIs","🗄 Raw Data"])
         with tabs[0]: tab_gas(ops, ma, xr)
         with tabs[1]: tab_feed(ops, ma, xr)
         with tabs[2]: tab_purif(ops, ma, xr)
@@ -2399,7 +2657,8 @@ def main():
         with tabs[6]: tab_lab(all_data, selected, date_filter)
         with tabs[7]: tab_dung(all_data, selected, date_filter)
         with tabs[8]: tab_fert(all_data, selected)
-        with tabs[9]: tab_raw(ops, all_data, selected, date_filter)
+        with tabs[9]: tab_kpi_page(ops, all_data, selected, date_filter)
+        with tabs[10]: tab_raw(ops, all_data, selected, date_filter)
 
 
 if __name__ == "__main__":
