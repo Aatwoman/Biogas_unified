@@ -258,7 +258,7 @@ SEEK = {
     "gen_inlet_diff":      ["gen-inlet"],
     "total_purified_gas":  ["total purified gas"],
     "expected_gas_kg":     ["expected gas"],
-    "cbg_mass_fm_kg":      ["cbg mass fm"],
+    "cbg_mass_fm_kg":      ["cbg mass fm (kg)","cbg mass fm","mass fm (kg)","mass fm"],
     "mfm_gas_total":       ["mfm total","mfm gas total","total gas (mfm)","bg mfm total"],
     "pure_gas_purity_fm":  ["pure gas purity in fm","pure gas purity"],
     "cbg_sales_kg":        ["total cbg sales dispenser","total cbg sales"],
@@ -372,21 +372,19 @@ def _build_col_index(raw):
     sec_row, hdr_row = _find_header_rows(raw)
     header  = [str(v).replace("\n"," ").strip().lower() if pd.notna(v) else "" for v in raw.iloc[hdr_row]]
     section = [str(v).replace("\n"," ").strip().lower() if pd.notna(v) else "" for v in raw.iloc[sec_row]]
-    # Also read the row immediately below the header row — some sheets have a
-    # two-row header where section names (e.g. "GAS WEIGHT") are on hdr_row and
-    # sub-column labels (e.g. "CBG Mass FM (kg)") are on hdr_row+1.
-    sub_row = hdr_row + 1
-    subheader = ([str(v).replace("\n"," ").strip().lower() if pd.notna(v) else ""
-                  for v in raw.iloc[sub_row]]
-                 if sub_row < len(raw) else [])
+    # Read all rows from 0..hdr_row into a list for multi-row header scanning
+    all_rows = []
+    for r in range(min(hdr_row + 2, len(raw))):
+        all_rows.append([str(v).replace("\n"," ").strip().lower() if pd.notna(v) else ""
+                         for v in raw.iloc[r]])
     idx = {}
     skip = set(_SECOND.keys()) | {"vpsa_kwh_total","bg_mfm_kwh_total","hp_comp_kwh_init","hp_comp_kwh_final","mfm_gas_total"}
     for key, needles in SEEK.items():
         if key in skip: continue
         for needle in needles:
             nl = needle.lower()
-            # search main header row first, then sub-header row
-            for row in (header, subheader):
+            # search every scanned row so multi-row headers are covered
+            for row in all_rows:
                 for c, h in enumerate(row):
                     if nl in h:
                         idx[key] = c; break
@@ -408,7 +406,7 @@ def _build_col_index(raw):
         h = header[c] if c < len(header) else ""
         if "initial" in h:   idx["hp_comp_kwh_init"]  = c
         elif "final" in h:   idx["hp_comp_kwh_final"] = c
-    # ── MFM gas total — try header needles first, fall back to col AL (idx 37) ─
+    # ── MFM gas total ─────────────────────────────────────────────────────────
     _mfm_needles = ["mfm total","mfm gas total","total gas (mfm)","bg mfm total"]
     for needle in _mfm_needles:
         for c, h in enumerate(header):
@@ -416,15 +414,17 @@ def _build_col_index(raw):
                 idx["mfm_gas_total"] = c; break
         if "mfm_gas_total" in idx: break
     if "mfm_gas_total" not in idx and len(header) > 37:
-        idx["mfm_gas_total"] = 37   # col AL positional fallback
-    # ── cbg_mass_fm_kg: if still not found via SEEK, scan subheader explicitly ─
+        idx["mfm_gas_total"] = 37
+    # ── cbg_mass_fm_kg: use "GAS WEIGHT" section + "cbg mass fm" sub-col ──────
+    # If SEEK already found it via all_rows scan, skip. Otherwise find the
+    # second column under the "gas weight" section header.
     if "cbg_mass_fm_kg" not in idx:
-        for c, h in enumerate(subheader):
-            if "cbg mass fm" in h:
-                idx["cbg_mass_fm_kg"] = c; break
-    # final positional fallback col Z (idx 25)
-    if "cbg_mass_fm_kg" not in idx and len(header) > 25:
-        idx["cbg_mass_fm_kg"] = 25
+        gw_cols = [c for c, s in enumerate(section) if "gas weight" in s]
+        if len(gw_cols) >= 2:
+            idx["cbg_mass_fm_kg"] = gw_cols[1]   # second col under GAS WEIGHT
+        elif len(gw_cols) == 1:
+            # try the column one to the right
+            idx["cbg_mass_fm_kg"] = gw_cols[0] + 1
     return idx
 
 
