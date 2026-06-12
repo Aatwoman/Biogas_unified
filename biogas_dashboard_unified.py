@@ -606,23 +606,23 @@ def _xrange(df):
 def _base(fig, height=500, xr=None):
     fig.update_layout(
         paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
-        font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=12),
+        font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=14),
         legend=dict(orientation="h", yanchor="top", y=-0.18,
                     xanchor="center", x=0.5, bgcolor="rgba(255,255,255,.9)",
-                    bordercolor="#dde6f4", borderwidth=1, font=dict(size=11,color=FONT_COLOR)),
+                    bordercolor="#dde6f4", borderwidth=1, font=dict(size=13,color=FONT_COLOR)),
         hovermode="x unified", height=height, title_x=0,
-        title_font=dict(size=13, color="#1e2d45", family="Space Mono,monospace"),
+        title_font=dict(size=15, color="#1e2d45", family="Space Mono,monospace"),
         margin=dict(l=10, r=10, t=44, b=80),
     )
     xkw = dict(showgrid=True, gridcolor=CHART_GRID, gridwidth=1,
                zeroline=False, showline=True, linecolor="#dde6f4",
-               tickfont=dict(size=11,color=AXIS_COLOR), tickcolor=AXIS_COLOR,
+               tickfont=dict(size=13,color=AXIS_COLOR), tickcolor=AXIS_COLOR,
                title_font=dict(color=AXIS_COLOR), type="date", autorange=(xr is None))
     if xr is not None: xkw["range"] = xr
     fig.update_xaxes(**xkw)
     fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID, gridwidth=1,
                      zeroline=False, showline=False,
-                     tickfont=dict(size=11,color=AXIS_COLOR), title_font=dict(color=AXIS_COLOR))
+                     tickfont=dict(size=13,color=AXIS_COLOR), title_font=dict(color=AXIS_COLOR))
     return fig
 
 
@@ -667,7 +667,7 @@ def bar_line_fig(df, x, ycol, title, ylab="", ma=7, height=420, xr=None,
             line_width=0,
             annotation_text=f"Optimal {opt_low}–{opt_high}",
             annotation_font_color="#2e7d32",
-            annotation_font_size=10,
+            annotation_font_size=13,
         )
     fig.update_layout(
         title=title, yaxis_title=ylab,
@@ -734,7 +734,7 @@ def bar_fig(df, x, y, title, color="plant", height=480):
         marker_line_width=0,
         texttemplate="%{text:.3s}",
         textposition="outside",
-        textfont=dict(size=10, color=FONT_COLOR),
+        textfont=dict(size=13, color=FONT_COLOR),
         cliponaxis=False,
     )
     # Add some top margin so labels don't get clipped
@@ -743,7 +743,7 @@ def bar_fig(df, x, y, title, color="plant", height=480):
     fig.update_layout(
         paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
         font=dict(color=FONT_COLOR,family="Inter,sans-serif"),
-        title_font=dict(size=13,color="#1e2d45",family="Space Mono,monospace"),
+        title_font=dict(size=15,color="#1e2d45",family="Space Mono,monospace"),
         legend=dict(orientation="h",yanchor="top",y=-0.18,xanchor="center",x=0.5,
                     bgcolor="rgba(255,255,255,.9)",bordercolor="#dde6f4",
                     borderwidth=1,font=dict(color=FONT_COLOR)),
@@ -800,7 +800,7 @@ def scatter_fig(df, x, y, title, color="sample_point", height=520):
         title=title,
         paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
         font=dict(color=FONT_COLOR, family="Inter,sans-serif"),
-        title_font=dict(size=13, color="#1e2d45", family="Space Mono,monospace"),
+        title_font=dict(size=15, color="#1e2d45", family="Space Mono,monospace"),
         legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
                     bgcolor="rgba(255,255,255,.9)", bordercolor="#dde6f4",
                     borderwidth=1, font=dict(color=FONT_COLOR)),
@@ -1375,17 +1375,17 @@ def _render_mfm_vs_expected(all_data, selected, date_filter):
             title="Gas Mass — MFM (Actual) vs Expected (Calc)  [kg/day · Deviation % on right axis]",
             barmode="group",
             paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
-            font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=12),
+            font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=14),
             legend=dict(orientation="h", yanchor="top", y=-0.22,
                         xanchor="center", x=0.5, bgcolor="rgba(255,255,255,.9)",
-                        bordercolor="#dde6f4", borderwidth=1, font=dict(size=11, color=FONT_COLOR)),
+                        bordercolor="#dde6f4", borderwidth=1, font=dict(size=13, color=FONT_COLOR)),
             hovermode="x unified", height=430, title_x=0,
-            title_font=dict(size=13, color="#1e2d45", family="Space Mono,monospace"),
+            title_font=dict(size=15, color="#1e2d45", family="Space Mono,monospace"),
             margin=dict(l=10, r=60, t=44, b=100),
             yaxis=dict(
                 title="kg/day",
                 showgrid=True, gridcolor=CHART_GRID, gridwidth=1,
-                zeroline=False, tickfont=dict(size=11, color=AXIS_COLOR),
+                zeroline=False, tickfont=dict(size=13, color=AXIS_COLOR),
                 title_font=dict(color=AXIS_COLOR),
             ),
             yaxis2=dict(
@@ -1393,13 +1393,13 @@ def _render_mfm_vs_expected(all_data, selected, date_filter):
                 overlaying="y", side="right",
                 showgrid=False,
                 zeroline=True, zerolinecolor="#f0c040", zerolinewidth=1.5,
-                tickfont=dict(size=11, color="#c84b00"),
+                tickfont=dict(size=13, color="#c84b00"),
                 title_font=dict(color="#c84b00"),
             ),
         )
         xkw = dict(showgrid=True, gridcolor=CHART_GRID, gridwidth=1,
                    zeroline=False, showline=True, linecolor="#dde6f4",
-                   tickfont=dict(size=11, color=AXIS_COLOR), tickcolor=AXIS_COLOR,
+                   tickfont=dict(size=13, color=AXIS_COLOR), tickcolor=AXIS_COLOR,
                    title_font=dict(color=AXIS_COLOR), type="date", autorange=(xr is None))
         if xr is not None:
             xkw["range"] = xr
@@ -1462,24 +1462,24 @@ def _render_yield_chart(all_data, selected, date_filter):
             title="Daily Biogas Yield  [Total Generated Gas ÷ Total Feed]",
             barmode="group",
             paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
-            font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=12),
+            font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=14),
             legend=dict(orientation="h", yanchor="top", y=-0.18,
                         xanchor="center", x=0.5, bgcolor="rgba(255,255,255,.9)",
-                        bordercolor="#dde6f4", borderwidth=1, font=dict(size=11, color=FONT_COLOR)),
+                        bordercolor="#dde6f4", borderwidth=1, font=dict(size=13, color=FONT_COLOR)),
             hovermode="x unified", height=400, title_x=0,
-            title_font=dict(size=13, color="#1e2d45", family="Space Mono,monospace"),
+            title_font=dict(size=15, color="#1e2d45", family="Space Mono,monospace"),
             margin=dict(l=10, r=10, t=44, b=80),
             yaxis_title="m³/ton",
         )
         xkw = dict(showgrid=True, gridcolor=CHART_GRID, gridwidth=1,
                    zeroline=False, showline=True, linecolor="#dde6f4",
-                   tickfont=dict(size=11, color=AXIS_COLOR), tickcolor=AXIS_COLOR,
+                   tickfont=dict(size=13, color=AXIS_COLOR), tickcolor=AXIS_COLOR,
                    title_font=dict(color=AXIS_COLOR), type="date", autorange=(xr is None))
         if xr is not None:
             xkw["range"] = xr
         fig.update_xaxes(**xkw)
         fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID, gridwidth=1,
-                         zeroline=False, tickfont=dict(size=11, color=AXIS_COLOR),
+                         zeroline=False, tickfont=dict(size=13, color=AXIS_COLOR),
                          title_font=dict(color=AXIS_COLOR))
         _pc(fig, "kpi_yield_compare")
     except Exception as e:
@@ -1817,13 +1817,13 @@ def tab_lab(all_data, selected, df_flt):
                     title=f"{plant_val} — {param_label} ({param_unit})",
                     paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
                     font=dict(color=FONT_COLOR, family="Inter,sans-serif"),
-                    title_font=dict(size=12, color="#1e2d45", family="Space Mono,monospace"),
+                    title_font=dict(size=14, color="#1e2d45", family="Space Mono,monospace"),
                     legend=dict(
                         orientation="v", yanchor="top", y=1.0,
                         xanchor="left", x=1.01,
                         bgcolor="rgba(255,255,255,0.9)",
                         bordercolor="#dde6f4", borderwidth=1,
-                        font=dict(size=10, color=FONT_COLOR),
+                        font=dict(size=13, color=FONT_COLOR),
                     ),
                     height=380,
                     margin=dict(l=10, r=150, t=44, b=40),
@@ -1831,9 +1831,9 @@ def tab_lab(all_data, selected, df_flt):
                     yaxis_title=param_unit,
                 )
                 fig.update_xaxes(showgrid=True, gridcolor=CHART_GRID,
-                                  tickfont=dict(size=10, color=AXIS_COLOR), type="date")
+                                  tickfont=dict(size=13, color=AXIS_COLOR), type="date")
                 fig.update_yaxes(showgrid=True, gridcolor=CHART_GRID,
-                                  tickfont=dict(size=10, color=AXIS_COLOR))
+                                  tickfont=dict(size=13, color=AXIS_COLOR))
                 with plant_cols[pi]:
                     st.plotly_chart(fig, use_container_width=True,
                                     key=f"lab_{param_key}_{plant_val}")
@@ -1971,7 +1971,7 @@ def tab_month_compare(all_data, selected, date_filter):
                     y0=opt_lo, y1=opt_hi,
                     fillcolor="#2e7d32", opacity=0.06, line_width=0,
                     annotation_text=f"Optimal {opt_lo}–{opt_hi}",
-                    annotation_font_color="#2e7d32", annotation_font_size=10,
+                    annotation_font_color="#2e7d32", annotation_font_size=13,
                 )
 
             fig.update_layout(
@@ -1980,25 +1980,25 @@ def tab_month_compare(all_data, selected, date_filter):
                 xaxis_title="Day of month",
                 barmode="overlay",
                 paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
-                font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=12),
-                title_font=dict(size=13, color="#1e2d45", family="Space Mono,monospace"),
+                font=dict(color=FONT_COLOR, family="Inter,sans-serif", size=14),
+                title_font=dict(size=15, color="#1e2d45", family="Space Mono,monospace"),
                 legend=dict(orientation="h", yanchor="top", y=-0.18,
                             xanchor="center", x=0.5,
                             bgcolor="rgba(255,255,255,.9)",
                             bordercolor="#dde6f4", borderwidth=1,
-                            font=dict(size=11, color=FONT_COLOR)),
+                            font=dict(size=13, color=FONT_COLOR)),
                 height=400, title_x=0, margin=dict(l=10, r=10, t=44, b=80),
                 hovermode="x unified",
             )
             fig.update_xaxes(
                 tickmode="linear", dtick=1,
                 showgrid=True, gridcolor=CHART_GRID,
-                tickfont=dict(size=10, color=AXIS_COLOR),
+                tickfont=dict(size=13, color=AXIS_COLOR),
                 title_font=dict(color=AXIS_COLOR),
             )
             fig.update_yaxes(
                 showgrid=True, gridcolor=CHART_GRID,
-                tickfont=dict(size=11, color=AXIS_COLOR),
+                tickfont=dict(size=13, color=AXIS_COLOR),
                 title_font=dict(color=AXIS_COLOR),
             )
             st.plotly_chart(fig, use_container_width=True, key=f"mvc_{col}")
@@ -2211,7 +2211,7 @@ def tab_dung(all_data, selected, df_flt):
                              title=f"Dung Route – {needle}")
                 fig.update_layout(paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
                     font=dict(color=FONT_COLOR,family="Inter,sans-serif"),
-                    title_font=dict(size=13,color="#1e2d45",family="Space Mono,monospace"),
+                    title_font=dict(size=15,color="#1e2d45",family="Space Mono,monospace"),
                     legend=dict(orientation="h",yanchor="top",y=-0.18,xanchor="center",x=0.5,
                         bgcolor="rgba(255,255,255,.9)",bordercolor="#dde6f4",borderwidth=1,font=dict(color=FONT_COLOR)),
                     height=460, margin=dict(l=10,r=10,t=44,b=80))
@@ -2248,7 +2248,7 @@ def tab_fert(all_data, selected):
         fig.update_traces(marker=dict(size=4,opacity=0.6))
         fig.update_layout(paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
             font=dict(color=FONT_COLOR,family="Inter,sans-serif"),
-            title_font=dict(size=13,color="#1e2d45",family="Space Mono,monospace"),
+            title_font=dict(size=15,color="#1e2d45",family="Space Mono,monospace"),
             legend=dict(orientation="h",yanchor="top",y=-0.18,xanchor="center",x=0.5,
                 bgcolor="rgba(255,255,255,.9)",bordercolor="#dde6f4",borderwidth=1,font=dict(color=FONT_COLOR)),
             height=500, margin=dict(l=10,r=10,t=44,b=80))
@@ -2566,6 +2566,95 @@ def tab_kpi_page(ops, all_data, selected, date_filter):
                 st.markdown("<div style='margin:4px 0'></div>", unsafe_allow_html=True)
 
         st.markdown("---")
+
+    # ── Lab & Slurry KPIs ─────────────────────────────────────────────────────
+    sec("🧪 LAB & SLURRY ANALYSIS KPIs")
+
+    lab_params = [
+        ("pH",        "pH",      "pH",    2, 6.8, 7.8),
+        ("EC_mScm",   "EC",      "mS/cm", 2, None, None),
+        ("TS_pct",    "TS",      "%",     1, None, None),
+        ("VS_pct",    "VS",      "%",     1, None, None),
+        ("Temp_C",    "Temp",    "°C",    1, 35,   40),
+        ("Carbon_pct","Carbon",  "%",     1, None, None),
+    ]
+    lab_icons = {"pH":"⚗","EC_mScm":"⚡","TS_pct":"🧱","VS_pct":"🌿","Temp_C":"🌡","Carbon_pct":"⬛"}
+    SAMPLE_POINT_SHORT = {
+        "RCD (Raw Cattle Dung)":       "RCD",
+        "Digester Top Sampling Point": "Dig Top",
+        "Digester Mid Sampling Point": "Dig Mid",
+        "Digester Bottom Sampling Point": "Dig Bot",
+        "Mixing Tank":                 "Mix Tank",
+        "Slurry Tank":                 "Slurry",
+        "Separated Slurry Tank":       "Sep Slurry",
+        "Filter Tank":                 "Filter",
+    }
+
+    for rp in render_plants:
+        if n_plants > 1:
+            st.markdown(
+                f"<div style='font-family:Space Mono,monospace;font-size:.78rem;"
+                f"font-weight:700;color:#1a56db;margin:10px 0 4px'>🏭 {rp.upper()}</div>",
+                unsafe_allow_html=True)
+
+        lab_df = all_data.get(rp, {}).get("lab", pd.DataFrame())
+        if not lab_df.empty and date_filter:
+            lab_df = _flt(lab_df, date_filter)
+        if lab_df.empty:
+            st.info(f"No lab data for {rp} in selected range."); continue
+
+        # Aggregate: daily mean per (date, sample_point)
+        lab_df["_date"] = lab_df["date"].dt.normalize()
+        lab_num_cols = [c for c, *_ in lab_params if c in lab_df.columns]
+        lab_agg = (lab_df.groupby(["_date", "sample_point"], as_index=False)[lab_num_cols].mean())
+
+        sample_points = sorted(lab_agg["sample_point"].dropna().unique())
+        if not sample_points:
+            st.info("No sample points found."); continue
+
+        for sp in sample_points:
+            sp_df = lab_agg[lab_agg["sample_point"] == sp]
+            sp_short = SAMPLE_POINT_SHORT.get(sp, sp)
+
+            # Check any data exists
+            if not any(sp_df[c].dropna().shape[0] > 0 for c, *_ in lab_params if c in sp_df.columns):
+                continue
+
+            st.markdown(
+                f"<div style='font-size:.72rem;font-weight:700;color:#5a7a9a;"
+                f"text-transform:uppercase;letter-spacing:.07em;margin:8px 0 3px'>"
+                f"📍 {sp}</div>", unsafe_allow_html=True)
+
+            row_cards = []
+            for (col, lbl, unit, dec, opt_lo, opt_hi) in lab_params:
+                if col not in sp_df.columns: continue
+                vals = sp_df[col].dropna()
+                if vals.empty: continue
+                avg = float(vals.mean())
+                mn  = float(vals.min())
+                mx  = float(vals.max())
+                sym, tcol = ("▲","#2e7d32") if len(vals)>4 and vals.iloc[-2:].mean()>vals.iloc[:2].mean()*1.02 else \
+                            ("▼","#b71c1c") if len(vals)>4 and vals.iloc[-2:].mean()<vals.iloc[:2].mean()*0.98 else \
+                            ("─","#8aaac8")
+                opt = _opt_badge(avg, opt_lo, opt_hi)
+                row_cards.append(_kpi_stat_card(
+                    lab_icons.get(col, "🧪"),
+                    f"{lbl} · {sp_short}", unit, avg,
+                    float("nan"),   # no "total" for lab params
+                    mn, mx, sym, tcol, opt_note=opt, show_total=False, dec=dec
+                ))
+
+            COLS = 5
+            for i in range(0, len(row_cards), COLS):
+                chunk = row_cards[i:i+COLS]
+                cols  = st.columns(len(chunk))
+                for j, card_html in enumerate(chunk):
+                    with cols[j]:
+                        st.markdown(card_html, unsafe_allow_html=True)
+                st.markdown("<div style='margin:4px 0'></div>", unsafe_allow_html=True)
+
+        if n_plants > 1:
+            st.markdown("---")
 
 
 def main():
