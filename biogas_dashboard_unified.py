@@ -979,18 +979,18 @@ def _kpi_cards(df, label_prefix=""):
     # ── Electricity consumed ──────────────────────────────────────────────────
     elec_val = fmt(ss("vpsa_kwh_total"), 0)
 
-    # ── Total gas gen — Mass Flow Meter total (col AL / mfm_gas_total) ───────
-    mfm_sum  = ss("mfm_gas_total")
-    mfm_avg  = sm("mfm_gas_total")
+    # ── Total gas gen — CBG Mass FM (kg) ─────────────────────────────────────
+    cbg_fm_sum = ss("cbg_mass_fm_kg")
+    cbg_fm_avg = sm("cbg_mass_fm_kg")
     gen_kg_lines = []
-    if not _math.isnan(mfm_avg):
+    if not _math.isnan(cbg_fm_avg):
         gen_kg_lines.append(
-            f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(mfm_avg, 0)}</span>"
-            f"<span style='font-size:.65rem;color:#5a7a9a'> avg/day</span>")
-    if not _math.isnan(mfm_sum):
+            f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(cbg_fm_avg, 0)}</span>"
+            f"<span style='font-size:.65rem;color:#5a7a9a'> kg/day</span>")
+    if not _math.isnan(cbg_fm_sum):
         gen_kg_lines.append(
-            f"<span style='font-size:.78rem;color:#2e7d32'>{fmt(mfm_sum, 0)}</span>"
-            f"<span style='font-size:.63rem;color:#5a7a9a'> total</span>")
+            f"<span style='font-size:.78rem;color:#2e7d32'>{fmt(cbg_fm_sum, 0)}</span>"
+            f"<span style='font-size:.63rem;color:#5a7a9a'> kg total</span>")
     gen_kg_html = "<br>".join(gen_kg_lines) if gen_kg_lines else "–"
 
     # ── Build rows ────────────────────────────────────────────────────────────
