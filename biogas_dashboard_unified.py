@@ -324,6 +324,7 @@ def _iqr_clip(s: pd.Series, factor: float = 3.0) -> pd.Series:
 _NONZERO_COLS = {
     "total_generated_gas", "total_purified_gas", "total_raw_gas",
     "raw_ch4", "pure_ch4", "dung_tons", "total_feed_m3",
+    "cbg_mass_fm_kg", "mfm_gas_total",   # 0-entries are placeholder, not real zero production
 }
 
 def _clean_ops(df: pd.DataFrame) -> pd.DataFrame:
@@ -430,12 +431,11 @@ def _build_col_index(raw):
 
 def _to_num(s):
     if not isinstance(s, pd.Series): return pd.Series(dtype=float)
-    # Strip trailing unit suffixes entered in Excel cells (e.g. "1468kg", "0kg", "37.5m³")
-    # Handles both object dtype and pandas StringDtype (dtype.name == "str" / "string").
+    # Strip trailing unit text typed into cells (e.g. "1468kg", "0kg", "37.5m³").
+    # Must handle both object dtype AND pandas StringDtype (dtype.name == "str").
     import re as _re
     _unit_pat = _re.compile(r'(?<=[\d.])[a-zA-Z\u00b3\u00b0%\s]+$')
-    _needs_clean = s.dtype == object or str(s.dtype) in ("string", "str")
-    if _needs_clean:
+    if s.dtype == object or str(s.dtype) in ("string", "str"):
         s = s.astype(object).apply(
             lambda v: _unit_pat.sub('', str(v).strip()) if pd.notna(v) else v
         )
