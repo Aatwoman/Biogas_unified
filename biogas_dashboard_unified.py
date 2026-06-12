@@ -258,7 +258,7 @@ SEEK = {
     "gen_inlet_diff":      ["gen-inlet"],
     "total_purified_gas":  ["total purified gas"],
     "expected_gas_kg":     ["expected gas"],
-    "cbg_mass_fm_kg":      ["cbg mass fm"],
+    "cbg_mass_fm_kg":      ["cbg mass fm (kg)","cbg mass fm"],
     "mfm_gas_total":       ["mfm total","mfm gas total","total gas (mfm)","bg mfm total"],
     "pure_gas_purity_fm":  ["pure gas purity in fm","pure gas purity"],
     "cbg_sales_kg":        ["total cbg sales dispenser","total cbg sales"],
@@ -407,6 +407,9 @@ def _build_col_index(raw):
         if "mfm_gas_total" in idx: break
     if "mfm_gas_total" not in idx and len(header) > 37:
         idx["mfm_gas_total"] = 37   # col AL positional fallback
+    # ── cbg_mass_fm_kg positional fallback → col Z (idx 25) ──────────────────
+    if "cbg_mass_fm_kg" not in idx and len(header) > 25:
+        idx["cbg_mass_fm_kg"] = 25  # col Z positional fallback
     return idx
 
 
@@ -810,33 +813,6 @@ def sidebar():
             st.info("⬆ Upload one or more plant Excel files to begin.")
             return {}, [], {}, "individual"
 
-        # ── Column debug expander (helps fix misdetected columns) ─────────────
-        with st.expander("🔍 Column detection debug", expanded=False):
-            for f in uploaded:
-                st.markdown(f"**{f.name}**")
-                try:
-                    f.seek(0)
-                    rb2 = f.read()
-                    raw2 = _read_sheet(rb2, "Daily Operations", fname=f.name)
-                    _, hdr_row = _find_header_rows(raw2)
-                    headers = [str(v).replace("\n"," ").strip()
-                               if pd.notna(v) else "" for v in raw2.iloc[hdr_row]]
-                    col_idx = _build_col_index(raw2)
-                    # Show detected keys and their col index + header text
-                    rows = []
-                    for key in ["cbg_mass_fm_kg","mfm_gas_total","total_generated_gas",
-                                "total_purified_gas","cbg_sales_kg","vpsa_kwh_total",
-                                "bg_mfm_kwh_total","flare_m3","num_vehicles"]:
-                        c = col_idx.get(key)
-                        hdr_txt = headers[c] if c is not None and c < len(headers) else "—"
-                        rows.append({"key": key, "col_idx": c, "header": hdr_txt})
-                    st.dataframe(rows, use_container_width=True)
-                    st.caption(f"Raw header row {hdr_row}: " +
-                               " | ".join(f"[{i}]{h}" for i, h in enumerate(headers)
-                                          if h.strip()))
-                except Exception as ex:
-                    st.warning(f"Debug read failed: {ex}")
-
         # Plant / view section
         st.markdown('<div class="sb-section"></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-section-label">🏭 PLANT SELECTION</div>', unsafe_allow_html=True)
@@ -1006,7 +982,7 @@ def _kpi_cards(df, label_prefix=""):
     # ── Electricity consumed ──────────────────────────────────────────────────
     elec_val = fmt(ss("vpsa_kwh_total"), 0)
 
-    # ── Total gas gen — CBG Mass FM (kg) ─────────────────────────────────────
+    # ── Total gas gen — CBG Mass FM (kg) · col Z ─────────────────────────────
     cbg_fm_sum = ss("cbg_mass_fm_kg")
     cbg_fm_avg = sm("cbg_mass_fm_kg")
     gen_kg_lines = []
