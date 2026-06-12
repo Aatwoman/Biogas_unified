@@ -1116,10 +1116,10 @@ def _kpi_cards(df, label_prefix=""):
     # Gen–Inlet diff if both present
     if not _math.isnan(raw_gen_avg) and not _math.isnan(raw_inlet_avg):
         diff = raw_gen_avg - raw_inlet_avg
-        diff_color = "#b71c1c" if diff > 50 else "#5a7a9a"
+        diff_color = "#5a7a9a"
         raw_gen_lines.append(
             f"<span style='font-size:.7rem;color:{diff_color}'>"
-            f"Δ {fmt(diff, 0)} m³/d loss</span>")
+            f"Δ {fmt(diff, 0)} m³/d</span>")
     raw_gas_gen_html = "<br>".join(raw_gen_lines) if raw_gen_lines else "–"
 
     row1 = [
@@ -1135,8 +1135,6 @@ def _kpi_cards(df, label_prefix=""):
          f"{fmt(sm('purif_efficiency'), 1)}", "%",
          "✅ Optimal ≥ 95%" if not _math.isnan(sm("purif_efficiency")) and sm("purif_efficiency") >= 95
          else "⚠ Target: ≥95%" if not _math.isnan(sm("purif_efficiency")) else ""),
-        ("🔥",   "Gas Gen (kg)  [Actual vs Expected]",
-         gen_kg_html, "", ""),
     ]
     row2 = [
         ("🚗",   "Vehicle + Cascade Sales",
@@ -1145,8 +1143,8 @@ def _kpi_cards(df, label_prefix=""):
          flare_val, "m³", ""),
         ("✨",   "Avg CH₄ Pure",
          f"{fmt(sm('pure_ch4'), 1)}", "%",
-         "✅ Optimal ≥ 90%" if not _math.isnan(sm("pure_ch4")) and sm("pure_ch4") >= 90
-         else "⚠ Target: ≥90%" if not _math.isnan(sm("pure_ch4")) else ""),
+         "✅ Optimal ≥ 95%" if not _math.isnan(sm("pure_ch4")) and sm("pure_ch4") >= 95
+         else "⚠ Target: ≥95%" if not _math.isnan(sm("pure_ch4")) else ""),
         ("⚡",   "Electricity",
          elec_val, "KWH", ""),
         ("📡",   "MFM Reading",
@@ -1160,7 +1158,7 @@ def _kpi_cards(df, label_prefix=""):
             f"margin:6px 0 4px;'>🏭 {label_prefix.upper()}</div>",
             unsafe_allow_html=True)
 
-    r1_cols = st.columns(6)
+    r1_cols = st.columns(5)
     for i, (icon, label, val, unit, opt) in enumerate(row1):
         with r1_cols[i]:
             st.markdown(_card(icon, label, val, unit, opt), unsafe_allow_html=True)
@@ -1277,15 +1275,11 @@ def render_kpis(ops, all_data=None, selected=None, date_filter=None, view_mode="
 
         # ── Yield per day chart (compare mode only) ───────────────────────────
         _render_yield_chart(all_data, selected, date_filter)
-        # ── MFM vs Expected gas comparison chart ──────────────────────────────
-        _render_mfm_vs_expected(all_data, selected, date_filter)
         # ── Formula reference table ───────────────────────────────────────────
         render_formula_table()
     else:
         _kpi_cards(ops)
         st.markdown("")
-        # ── MFM vs Expected gas comparison chart (single plant) ───────────────
-        _render_mfm_vs_expected(all_data, selected, date_filter)
         # ── Formula reference table ───────────────────────────────────────────
         render_formula_table()
 
@@ -1533,7 +1527,7 @@ def tab_gas(ops, ma, xr):
         with c4:
             _pc(bar_line_fig(ops,"date","pure_ch4",
                          "Purified Gas CH₄ (%)  [Inline analyser, pure side]",
-                         "%",ma,xr=xr, opt_low=90, opt_high=100),  "g4")
+                         "%",ma,xr=xr, opt_low=95, opt_high=100),  "g4")
 
         sec("⚠ H₂S LEVELS (PPM)  ·  Thresholds hidden for readability")
         c5,c6 = _cols2()
@@ -1914,7 +1908,7 @@ def tab_month_compare(all_data, selected, date_filter):
             ("total_sales_kg",       "Total CBG Sales (kg/d)",       "kg",  None, None),
             ("dung_tons",            "Dung Input (tons/day)",        "t",   None, None),
             ("raw_ch4",              "Raw CH₄ (%)",                  "%",   55,   65),
-            ("pure_ch4",             "Purified CH₄ (%)",             "%",   90,   100),
+            ("pure_ch4",             "Purified CH₄ (%)",             "%",   95,   100),
             ("digester_temp",        "Digester Temp (°C)",           "°C",  35,   40),
             ("digester_ph",          "Digester pH",                  "pH",  6.8,  7.5),
             ("vpsa_kwh_total",       "Electricity (KWH/day)",        "KWH", None, None),
@@ -2464,7 +2458,7 @@ def tab_kpi_page(ops, all_data, selected, date_filter):
             ("📡", "Pure Gas Purity FM",   "pure_gas_purity_fm",  "%",    False, 1, 97, 100),
         ]),
         ("🔬 GAS COMPOSITION — PURE", [
-            ("✨", "Pure CH₄",  "pure_ch4",  "%",   False, 1, 90, 100),
+            ("✨", "Pure CH₄",  "pure_ch4",  "%",   False, 1, 95, 100),
             ("✨", "Pure CO₂",  "pure_co2",  "%",   False, 1, None, None),
             ("✨", "Pure H₂S",  "pure_h2s",  "PPM", False, 0, None, None),
         ]),
@@ -2629,35 +2623,35 @@ def main():
     st.markdown("---")
 
     if view_mode == "compare" and len(selected) >= 2:
-        tabs = st.tabs(["📊 Compare","📅 Month vs Month","📊 Gas","🐄 Feedstock","⚗ Purification",
-                         "⚡ Power","🌡 Digester","🔬 Lab","🚛 Dung Routes","🌱 Fertilizer",
-                         "📋 All KPIs","🗄 Raw Data"])
-        with tabs[0]: tab_compare(all_data, selected, date_filter)
-        with tabs[1]: tab_month_compare(all_data, selected, date_filter)
-        with tabs[2]: tab_gas(ops, ma, xr)
-        with tabs[3]: tab_feed(ops, ma, xr)
-        with tabs[4]: tab_purif(ops, ma, xr)
-        with tabs[5]: tab_power(ops, ma, xr)
-        with tabs[6]: tab_digester(ops, ma, xr)
+        tabs = st.tabs(["📋 All KPIs","📊 Compare","📅 Month vs Month","📊 Gas","🐄 Feedstock",
+                         "⚗ Purification","⚡ Power","🌡 Digester","🔬 Lab","🚛 Dung Routes",
+                         "🌱 Fertilizer","🗄 Raw Data"])
+        with tabs[0]: tab_kpi_page(ops, all_data, selected, date_filter)
+        with tabs[1]: tab_compare(all_data, selected, date_filter)
+        with tabs[2]: tab_month_compare(all_data, selected, date_filter)
+        with tabs[3]: tab_gas(ops, ma, xr)
+        with tabs[4]: tab_feed(ops, ma, xr)
+        with tabs[5]: tab_purif(ops, ma, xr)
+        with tabs[6]: tab_power(ops, ma, xr)
+        with tabs[7]: tab_digester(ops, ma, xr)
+        with tabs[8]: tab_lab(all_data, selected, date_filter)
+        with tabs[9]: tab_dung(all_data, selected, date_filter)
+        with tabs[10]: tab_fert(all_data, selected)
+        with tabs[11]: tab_raw(ops, all_data, selected, date_filter)
+    else:
+        tabs = st.tabs(["📋 All KPIs","📊 Gas","🐄 Feedstock","⚗ Purification","⚡ Power",
+                         "🌡 Digester","📅 Month vs Month","🔬 Lab","🚛 Dung Routes",
+                         "🌱 Fertilizer","🗄 Raw Data"])
+        with tabs[0]: tab_kpi_page(ops, all_data, selected, date_filter)
+        with tabs[1]: tab_gas(ops, ma, xr)
+        with tabs[2]: tab_feed(ops, ma, xr)
+        with tabs[3]: tab_purif(ops, ma, xr)
+        with tabs[4]: tab_power(ops, ma, xr)
+        with tabs[5]: tab_digester(ops, ma, xr)
+        with tabs[6]: tab_month_compare(all_data, selected, date_filter)
         with tabs[7]: tab_lab(all_data, selected, date_filter)
         with tabs[8]: tab_dung(all_data, selected, date_filter)
         with tabs[9]: tab_fert(all_data, selected)
-        with tabs[10]: tab_kpi_page(ops, all_data, selected, date_filter)
-        with tabs[11]: tab_raw(ops, all_data, selected, date_filter)
-    else:
-        tabs = st.tabs(["📊 Gas","🐄 Feedstock","⚗ Purification","⚡ Power",
-                         "🌡 Digester","📅 Month vs Month","🔬 Lab","🚛 Dung Routes",
-                         "🌱 Fertilizer","📋 All KPIs","🗄 Raw Data"])
-        with tabs[0]: tab_gas(ops, ma, xr)
-        with tabs[1]: tab_feed(ops, ma, xr)
-        with tabs[2]: tab_purif(ops, ma, xr)
-        with tabs[3]: tab_power(ops, ma, xr)
-        with tabs[4]: tab_digester(ops, ma, xr)
-        with tabs[5]: tab_month_compare(all_data, selected, date_filter)
-        with tabs[6]: tab_lab(all_data, selected, date_filter)
-        with tabs[7]: tab_dung(all_data, selected, date_filter)
-        with tabs[8]: tab_fert(all_data, selected)
-        with tabs[9]: tab_kpi_page(ops, all_data, selected, date_filter)
         with tabs[10]: tab_raw(ops, all_data, selected, date_filter)
 
 
