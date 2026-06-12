@@ -810,6 +810,33 @@ def sidebar():
             st.info("⬆ Upload one or more plant Excel files to begin.")
             return {}, [], {}, "individual"
 
+        # ── Column debug expander (helps fix misdetected columns) ─────────────
+        with st.expander("🔍 Column detection debug", expanded=False):
+            for f in uploaded:
+                st.markdown(f"**{f.name}**")
+                try:
+                    f.seek(0)
+                    rb2 = f.read()
+                    raw2 = _read_sheet(rb2, "Daily Operations", fname=f.name)
+                    _, hdr_row = _find_header_rows(raw2)
+                    headers = [str(v).replace("\n"," ").strip()
+                               if pd.notna(v) else "" for v in raw2.iloc[hdr_row]]
+                    col_idx = _build_col_index(raw2)
+                    # Show detected keys and their col index + header text
+                    rows = []
+                    for key in ["cbg_mass_fm_kg","mfm_gas_total","total_generated_gas",
+                                "total_purified_gas","cbg_sales_kg","vpsa_kwh_total",
+                                "bg_mfm_kwh_total","flare_m3","num_vehicles"]:
+                        c = col_idx.get(key)
+                        hdr_txt = headers[c] if c is not None and c < len(headers) else "—"
+                        rows.append({"key": key, "col_idx": c, "header": hdr_txt})
+                    st.dataframe(rows, use_container_width=True)
+                    st.caption(f"Raw header row {hdr_row}: " +
+                               " | ".join(f"[{i}]{h}" for i, h in enumerate(headers)
+                                          if h.strip()))
+                except Exception as ex:
+                    st.warning(f"Debug read failed: {ex}")
+
         # Plant / view section
         st.markdown('<div class="sb-section"></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-section-label">🏭 PLANT SELECTION</div>', unsafe_allow_html=True)
