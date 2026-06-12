@@ -1,6 +1,13 @@
 """
-Biogas Plant Analytics Dashboard · Streamlit v11
+Biogas Plant Analytics Dashboard · Streamlit v13
 =================================================
+CHANGES v13:
+ 1.  KPI: Expected Gas (kg) shown inside the same "Total Gas Gen" card as CBG Mass FM
+ 2.  KPI: Purified Gas Yield card  (total_purified_gas m³ ÷ total feedstock tons)
+ 3.  Formula Reference Table: expandable panel below KPI rows with all key Excel/calc formulas
+
+CHANGES v12 (skipped — direct v11 → v13):
+
 CHANGES v11:
  1.  KPI: Raw material split — Dung + Waste Potato in same card
  2.  KPI: Biogas Yield (m³/ton feedstock) card
@@ -970,21 +977,34 @@ def _kpi_cards(df, label_prefix=""):
                         f"<span style='font-size:.65rem;color:#5a7a9a'> t/d potato</span>")
     rm_html = "<br>".join(rm_lines) if rm_lines else "–"
 
-    # ── Yield ─────────────────────────────────────────────────────────────────
-    total_gas = df["total_generated_gas"].dropna() if "total_generated_gas" in df.columns else pd.Series(dtype=float)
+    # ── Yield (raw generated gas & purified gas, both ÷ total feedstock) ────────
+    import math as _math  # ensure available in this scope
     total_feed = (df["dung_tons"].fillna(0) + df["waste_potato_tons"].fillna(0)
                   ) if "waste_potato_tons" in df.columns else df["dung_tons"].fillna(0) if "dung_tons" in df.columns else pd.Series(0, index=df.index)
     mask = total_feed > 0
+    raw_yield_mean  = float("nan")
+    pure_yield_mean = float("nan")
     if mask.any() and "total_generated_gas" in df.columns:
-        yield_series = df.loc[mask, "total_generated_gas"] / total_feed[mask]
-        yield_val = fmt(yield_series.dropna().mean(), 1)
-    else:
-        yield_val = "–"
+        raw_yield_mean = (df.loc[mask, "total_generated_gas"] / total_feed[mask]).dropna().mean()
+    if mask.any() and "total_purified_gas" in df.columns:
+        pure_yield_mean = (df.loc[mask, "total_purified_gas"] / total_feed[mask]).dropna().mean()
+    yield_val = fmt(raw_yield_mean, 1)
+
+    # ── Purified gas yield HTML (for dedicated KPI card) ─────────────────────
+    pure_yield_lines = []
+    if not _math.isnan(raw_yield_mean):
+        pure_yield_lines.append(
+            f"<span style='font-size:.85rem;font-weight:700;color:#1a56db'>{fmt(raw_yield_mean, 1)}</span>"
+            f"<span style='font-size:.63rem;color:#5a7a9a'> m³/t raw</span>")
+    if not _math.isnan(pure_yield_mean):
+        pure_yield_lines.append(
+            f"<span style='font-size:.85rem;font-weight:700;color:#2e7d32'>{fmt(pure_yield_mean, 1)}</span>"
+            f"<span style='font-size:.63rem;color:#5a7a9a'> m³/t purified</span>")
+    pure_yield_html = "<br>".join(pure_yield_lines) if pure_yield_lines else "–"
 
     # ── CBG sales (dispenser + cascade) ──────────────────────────────────────
     disp_sum  = ss("cbg_sales_kg")
     casc_sum  = ss("cascade_sales_kg")
-    import math as _math
     cbg_disp  = disp_sum if not _math.isnan(disp_sum) else 0
     cbg_casc  = casc_sum if not _math.isnan(casc_sum) else 0
     cbg_total = cbg_disp + cbg_casc
@@ -1006,23 +1026,46 @@ def _kpi_cards(df, label_prefix=""):
     # ── Electricity consumed ──────────────────────────────────────────────────
     elec_val = fmt(ss("vpsa_kwh_total"), 0)
 
-    # ── Total gas gen — CBG Mass FM (kg) · sub-header col ────────────────────
-    cbg_fm_sum = ss("cbg_mass_fm_kg")
-    cbg_fm_avg = sm("cbg_mass_fm_kg")
+    # ── Total gas gen — CBG Mass FM (actual) + Expected Gas ─────────────────
+    cbg_fm_sum  = ss("cbg_mass_fm_kg")
+    cbg_fm_avg  = sm("cbg_mass_fm_kg")
+    exp_gas_avg = sm("expected_gas_kg")
+    exp_gas_sum = ss("expected_gas_kg")
     gen_kg_lines = []
+    # Actual (CBG Mass FM)
     if not _math.isnan(cbg_fm_avg):
         gen_kg_lines.append(
-            f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(cbg_fm_avg, 0)}</span>"
-            f"<span style='font-size:.65rem;color:#5a7a9a'> kg/day</span>")
+            f"<span style='font-size:.85rem;font-weight:700;color:#1a56db'>{fmt(cbg_fm_avg, 0)}</span>"
+            f"<span style='font-size:.63rem;color:#5a7a9a'> kg/day actual</span>")
     if not _math.isnan(cbg_fm_sum):
         gen_kg_lines.append(
-            f"<span style='font-size:.78rem;color:#2e7d32'>{fmt(cbg_fm_sum, 0)}</span>"
-            f"<span style='font-size:.63rem;color:#5a7a9a'> kg total</span>")
+            f"<span style='font-size:.75rem;color:#1a56db'>{fmt(cbg_fm_sum, 0)}</span>"
+            f"<span style='font-size:.61rem;color:#5a7a9a'> kg total actual</span>")
+    # Divider — only shown when both sides have data
+    if gen_kg_lines and (not _math.isnan(exp_gas_avg) or not _math.isnan(exp_gas_sum)):
+        gen_kg_lines.append("<span style='font-size:.55rem;color:#c5d5eb'>────────────</span>")
+    # Expected
+    if not _math.isnan(exp_gas_avg):
+        gen_kg_lines.append(
+            f"<span style='font-size:.85rem;font-weight:700;color:#c84b00'>{fmt(exp_gas_avg, 0)}</span>"
+            f"<span style='font-size:.63rem;color:#5a7a9a'> kg/day expected</span>")
+    if not _math.isnan(exp_gas_sum):
+        gen_kg_lines.append(
+            f"<span style='font-size:.75rem;color:#c84b00'>{fmt(exp_gas_sum, 0)}</span>"
+            f"<span style='font-size:.61rem;color:#5a7a9a'> kg total expected</span>")
+    # Delta % (actual vs expected) — shown when both averages are available
+    if not _math.isnan(cbg_fm_avg) and not _math.isnan(exp_gas_avg) and exp_gas_avg != 0:
+        delta_pct = (cbg_fm_avg - exp_gas_avg) / exp_gas_avg * 100
+        delta_color = "#2e7d32" if delta_pct >= 0 else "#b71c1c"
+        delta_sign  = "▲" if delta_pct >= 0 else "▼"
+        gen_kg_lines.append(
+            f"<span style='font-size:.72rem;font-weight:600;color:{delta_color}'>"
+            f"{delta_sign} {abs(delta_pct):.1f}% vs expected</span>")
     gen_kg_html = "<br>".join(gen_kg_lines) if gen_kg_lines else "–"
 
     # ── Build rows ────────────────────────────────────────────────────────────
-    # Row 1:  Dung/Potato | Raw Gas Gen (avg) | Gas Yield | Pure Gas Gen (avg) | Flare (total)
-    # Row 2:  Total Gas Gen (sum) | Vehicle+Cascade Sales | Purif Eff | CH₄% | Electricity
+    # Row 1:  Dung/Potato | Raw Gas Gen (avg) | Raw+Pure Yield (m³/ton) | Pure Gas Gen (avg) | Purif. Eff. | CBG FM Gen (actual+expected)
+    # Row 2:  Total CBG Sales | Gas Flared | Avg CH₄ Pure | Electricity | (MFM placeholder)
 
     def _card(icon, label, value_html, unit="", opt_note=""):
         opt_bar = f"<div style='font-size:.6rem;color:#2e7d32;margin-top:2px'>{opt_note}</div>" if opt_note else ""
@@ -1034,23 +1077,44 @@ def _kpi_cards(df, label_prefix=""):
   {opt_bar}
 </div>"""
 
+    # ── Raw Gas Gen card — generated + inlet to purification ─────────────────
+    raw_gen_avg  = sm("total_generated_gas")
+    raw_inlet_avg = sm("total_raw_gas")
+    raw_gen_lines = []
+    if not _math.isnan(raw_gen_avg):
+        raw_gen_lines.append(
+            f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(raw_gen_avg, 0)}</span>"
+            f"<span style='font-size:.63rem;color:#5a7a9a'> m³/d generated</span>")
+    if not _math.isnan(raw_inlet_avg):
+        raw_gen_lines.append(
+            f"<span style='font-size:.9rem;font-weight:700;color:#2e7d32'>{fmt(raw_inlet_avg, 0)}</span>"
+            f"<span style='font-size:.63rem;color:#5a7a9a'> m³/d inlet (purif)</span>")
+    # Gen–Inlet diff if both present
+    if not _math.isnan(raw_gen_avg) and not _math.isnan(raw_inlet_avg):
+        diff = raw_gen_avg - raw_inlet_avg
+        diff_color = "#b71c1c" if diff > 50 else "#5a7a9a"
+        raw_gen_lines.append(
+            f"<span style='font-size:.7rem;color:{diff_color}'>"
+            f"Δ {fmt(diff, 0)} m³/d loss</span>")
+    raw_gas_gen_html = "<br>".join(raw_gen_lines) if raw_gen_lines else "–"
+
     row1 = [
         ("🐄🥔", "Raw Material",
          rm_html, "", ""),
-        ("🌿",   "Raw Gas Gen",
-         f"{fmt(sm('total_generated_gas'), 0)}", "m³/day", ""),
-        ("📈",   "Gas Yield",
-         yield_val, "m³/ton", ""),
+        ("🌿",   "Raw Gas Gen  [Generated / Inlet]",
+         raw_gas_gen_html, "", ""),
+        ("📈",   "Gas Yield  [Gen ÷ Feed  /  Purified ÷ Feed]",
+         pure_yield_html, "", ""),
         ("💨",   "Pure Gas Gen",
          f"{fmt(sm('total_purified_gas'), 0)}", "m³/day", ""),
         ("⚗",   "Purif. Eff.",
          f"{fmt(sm('purif_efficiency'), 1)}", "%",
          "✅ Optimal ≥ 95%" if not _math.isnan(sm("purif_efficiency")) and sm("purif_efficiency") >= 95
          else "⚠ Target: ≥95%" if not _math.isnan(sm("purif_efficiency")) else ""),
+        ("🔥",   "Gas Gen (kg)  [Actual vs Expected]",
+         gen_kg_html, "", ""),
     ]
     row2 = [
-        ("🔥",   "Total Gas Gen",
-         gen_kg_html, "", ""),
         ("🚗",   "Vehicle + Cascade Sales",
          cbg_html, "", ""),
         ("🔆",   "Gas Flared",
@@ -1061,6 +1125,8 @@ def _kpi_cards(df, label_prefix=""):
          else "⚠ Target: ≥90%" if not _math.isnan(sm("pure_ch4")) else ""),
         ("⚡",   "Electricity",
          elec_val, "KWH", ""),
+        ("📡",   "MFM Reading",
+         fmt(ss("bg_mfm_kwh_total"), 0), "KWH total", ""),
     ]
 
     if label_prefix:
@@ -1070,7 +1136,7 @@ def _kpi_cards(df, label_prefix=""):
             f"margin:6px 0 4px;'>🏭 {label_prefix.upper()}</div>",
             unsafe_allow_html=True)
 
-    r1_cols = st.columns(5)
+    r1_cols = st.columns(6)
     for i, (icon, label, val, unit, opt) in enumerate(row1):
         with r1_cols[i]:
             st.markdown(_card(icon, label, val, unit, opt), unsafe_allow_html=True)
@@ -1080,6 +1146,90 @@ def _kpi_cards(df, label_prefix=""):
     for i, (icon, label, val, unit, opt) in enumerate(row2):
         with r2_cols[i]:
             st.markdown(_card(icon, label, val, unit, opt), unsafe_allow_html=True)
+
+
+def render_formula_table():
+    """
+    Expandable formula reference panel — key calculations used in the Excel sheet
+    and derived fields in this dashboard.
+    """
+    FORMULAS = [
+        # Category, Name, Formula, Notes
+        ("⛽ Gas Generation",  "Total Generated Gas",       "FM_final − FM_initial  (m³)",          "Raw biogas generation meter, daily difference"),
+        ("⛽ Gas Generation",  "Total Raw Gas (Inlet)",      "Purifier inlet FM_final − FM_initial",  "Gas entering the purification unit"),
+        ("⛽ Gas Generation",  "Gen–Inlet Differential",     "Total Generated − Total Raw Gas",       "Unexplained gas before the purifier; flare + losses"),
+        ("⛽ Gas Generation",  "Total Purified Gas",         "Purifier outlet FM_final − FM_initial", "Biomethane/CBG exiting the VPSA unit"),
+        ("⚖ Gas Weight (kg)", "Expected Gas (kg)",          "Total Purified Gas (m³) × Pure Gas Purity FM (%) ÷ 100 × 0.717",
+                                                                                                       "0.717 kg/m³ = density of methane at STP"),
+        ("⚖ Gas Weight (kg)", "CBG Mass FM (kg)",           "MFM mass flow reading (direct)",        "Actual kg from the mass flow meter on the dispenser/outlet"),
+        ("⚖ Gas Weight (kg)", "CBG Sales – Dispenser (kg)", "Dispenser MFM final − initial",         "Retail dispenser mass sold"),
+        ("⚖ Gas Weight (kg)", "Cascade Sales (kg)",         "Cascade cylinder MFM final − initial",  "Bulk cylinder filling sales"),
+        ("⚖ Gas Weight (kg)", "Total CBG Sales (kg)",       "Dispenser Sales + Cascade Sales",       "Sum of all sales channels"),
+        ("📊 Efficiency",     "Purification Efficiency (%)", "Total Purified Gas ÷ Total Raw Gas × 100",  "Target ≥ 95 %"),
+        ("📊 Efficiency",     "BG Recovery (%)",            "Total Purified Gas ÷ Total Generated Gas × 100",  "Overall gas recovery from generation to purified output"),
+        ("📊 Efficiency",     "VPSA Specific Energy",       "VPSA KWH ÷ Total Purified Gas (m³)",   "Power intensity of the purification unit (KWH/m³)"),
+        ("📈 Yield",          "Raw Biogas Yield",           "Total Generated Gas (m³) ÷ Total Feedstock (tons)", "m³ per ton; feedstock = dung + waste potato"),
+        ("📈 Yield",          "Purified Gas Yield",         "Total Purified Gas (m³) ÷ Total Feedstock (tons)", "m³ of CBG per ton of input; primary performance KPI"),
+        ("🧪 Lab",            "Total Solids (TS %)",        "(Dry weight ÷ Wet weight) × 100",      "After oven drying at 105 °C, 24 h"),
+        ("🧪 Lab",            "Volatile Solids (VS %)",     "(Weight loss on ignition ÷ Wet weight) × 100",  "Muffle furnace at 550 °C; indicates biodegradable fraction"),
+        ("🌊 Flow Meters",    "Total Feed to Reactor (m³)", "Feed FM_final − FM_initial",            "Slurry volume pumped into the digester"),
+        ("🌊 Flow Meters",    "Total Filter Water (m³)",    "Filter FM_final − FM_initial",          "Dilution water added to the feed system"),
+        ("💧 Dewatering",     "Moisture Content (%)",       "(Wet weight − Dry weight) ÷ Wet weight × 100",  "Screw press / volute press effluent; target < 80 %"),
+    ]
+
+    with st.expander("📐 Formula Reference  ·  Key calculations used in Excel & dashboard", expanded=False):
+        st.markdown(
+            "<small style='color:#5a7a9a'>All daily-difference readings use the pattern "
+            "<code>FM_final − FM_initial</code>. Gas volumes in m³ at operating conditions unless noted. "
+            "CH₄ density = 0.717 kg/m³ at STP (0 °C, 1 atm).</small>",
+            unsafe_allow_html=True)
+
+        # Build grouped HTML table
+        prev_cat = None
+        table_rows = ""
+        for cat, name, formula, notes in FORMULAS:
+            cat_cell = ""
+            if cat != prev_cat:
+                # count rows in this category
+                n_in_cat = sum(1 for r in FORMULAS if r[0] == cat)
+                cat_cell = (
+                    f"<td rowspan='{n_in_cat}' style='"
+                    f"background:#eaf0fc;font-weight:700;font-size:.72rem;"
+                    f"color:#1a56db;vertical-align:top;padding:6px 8px;"
+                    f"border-right:2px solid #c5d5eb;white-space:nowrap'>{cat}</td>"
+                )
+                prev_cat = cat
+            table_rows += (
+                f"<tr style='border-bottom:1px solid #eef2f8'>"
+                f"{cat_cell}"
+                f"<td style='padding:5px 8px;font-size:.76rem;font-weight:600;color:#1e2d45;"
+                f"white-space:nowrap'>{name}</td>"
+                f"<td style='padding:5px 10px;font-size:.74rem;color:#1a56db;"
+                f"font-family:Space Mono,monospace'>{formula}</td>"
+                f"<td style='padding:5px 8px;font-size:.7rem;color:#5a7a9a'>{notes}</td>"
+                f"</tr>"
+            )
+
+        st.markdown(
+            f"""<div style='overflow-x:auto'>
+<table style='width:100%;border-collapse:collapse;font-family:Inter,sans-serif;
+              background:#fff;border:1px solid #dde6f4;border-radius:8px;overflow:hidden'>
+  <thead>
+    <tr style='background:#e8f0fc'>
+      <th style='padding:7px 8px;text-align:left;font-size:.72rem;font-weight:700;
+                 color:#1e2d45;border-bottom:2px solid #c5d5eb'>Category</th>
+      <th style='padding:7px 8px;text-align:left;font-size:.72rem;font-weight:700;
+                 color:#1e2d45;border-bottom:2px solid #c5d5eb'>Metric</th>
+      <th style='padding:7px 10px;text-align:left;font-size:.72rem;font-weight:700;
+                 color:#1e2d45;border-bottom:2px solid #c5d5eb'>Formula</th>
+      <th style='padding:7px 8px;text-align:left;font-size:.72rem;font-weight:700;
+                 color:#1e2d45;border-bottom:2px solid #c5d5eb'>Notes</th>
+    </tr>
+  </thead>
+  <tbody>{table_rows}</tbody>
+</table></div>""",
+            unsafe_allow_html=True,
+        )
 
 
 def render_kpis(ops, all_data=None, selected=None, date_filter=None, view_mode="individual"):
@@ -1105,11 +1255,15 @@ def render_kpis(ops, all_data=None, selected=None, date_filter=None, view_mode="
         _render_yield_chart(all_data, selected, date_filter)
         # ── MFM vs Expected gas comparison chart ──────────────────────────────
         _render_mfm_vs_expected(all_data, selected, date_filter)
+        # ── Formula reference table ───────────────────────────────────────────
+        render_formula_table()
     else:
         _kpi_cards(ops)
         st.markdown("")
         # ── MFM vs Expected gas comparison chart (single plant) ───────────────
         _render_mfm_vs_expected(all_data, selected, date_filter)
+        # ── Formula reference table ───────────────────────────────────────────
+        render_formula_table()
 
 
 def _render_mfm_vs_expected(all_data, selected, date_filter):
