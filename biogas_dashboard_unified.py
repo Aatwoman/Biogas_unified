@@ -156,9 +156,9 @@ section[data-testid="stMain"] {
     box-shadow:0 2px 6px rgba(26,86,219,.07);
 }
 .kpi-icon  { font-size:1.15rem; margin-bottom:5px; }
-.kpi-value { font-family:'Space Mono',monospace; font-size:1.5rem; font-weight:700;
+.kpi-value { font-family:'Space Mono',monospace; font-size:1.75rem; font-weight:700;
     color:#1a56db; line-height:1.1; }
-.kpi-label { font-size:0.67rem; font-weight:600; color:#5a7a9a;
+.kpi-label { font-size:0.8rem; font-weight:600; color:#5a7a9a;
     margin-top:4px; text-transform:uppercase; letter-spacing:.07em; }
 
 /* ── Section headers ── */
@@ -994,11 +994,11 @@ def _kpi_cards(df, label_prefix=""):
     potato_avg  = sm("waste_potato_tons")
     rm_lines = []
     if not math.isnan(dung_avg):
-        rm_lines.append(f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(dung_avg, 1)}</span>"
-                        f"<span style='font-size:.65rem;color:#5a7a9a'> t/d dung</span>")
+        rm_lines.append(f"<span style='font-size:1.1rem;font-weight:700;color:#1a56db'>{fmt(dung_avg, 1)}</span>"
+                        f"<span style='font-size:.78rem;color:#5a7a9a'> t/d dung</span>")
     if not math.isnan(potato_avg):
-        rm_lines.append(f"<span style='font-size:.9rem;font-weight:700;color:#2e7d32'>{fmt(potato_avg, 1)}</span>"
-                        f"<span style='font-size:.65rem;color:#5a7a9a'> t/d potato</span>")
+        rm_lines.append(f"<span style='font-size:1.1rem;font-weight:700;color:#2e7d32'>{fmt(potato_avg, 1)}</span>"
+                        f"<span style='font-size:.78rem;color:#5a7a9a'> t/d potato</span>")
     rm_html = "<br>".join(rm_lines) if rm_lines else "–"
 
     # ── Yield (raw generated gas & purified gas, both ÷ total feedstock) ────────
@@ -1018,12 +1018,12 @@ def _kpi_cards(df, label_prefix=""):
     pure_yield_lines = []
     if not _math.isnan(raw_yield_mean):
         pure_yield_lines.append(
-            f"<span style='font-size:.85rem;font-weight:700;color:#1a56db'>{fmt(raw_yield_mean, 1)}</span>"
-            f"<span style='font-size:.63rem;color:#5a7a9a'> m³/t raw</span>")
+            f"<span style='font-size:1.05rem;font-weight:700;color:#1a56db'>{fmt(raw_yield_mean, 1)}</span>"
+            f"<span style='font-size:.76rem;color:#5a7a9a'> m³/t raw</span>")
     if not _math.isnan(pure_yield_mean):
         pure_yield_lines.append(
-            f"<span style='font-size:.85rem;font-weight:700;color:#2e7d32'>{fmt(pure_yield_mean, 1)}</span>"
-            f"<span style='font-size:.63rem;color:#5a7a9a'> m³/t purified</span>")
+            f"<span style='font-size:1.05rem;font-weight:700;color:#2e7d32'>{fmt(pure_yield_mean, 1)}</span>"
+            f"<span style='font-size:.76rem;color:#5a7a9a'> m³/t purified</span>")
     pure_yield_html = "<br>".join(pure_yield_lines) if pure_yield_lines else "–"
 
     # ── CBG sales (dispenser + cascade) ──────────────────────────────────────
@@ -1034,13 +1034,13 @@ def _kpi_cards(df, label_prefix=""):
     cbg_total = cbg_disp + cbg_casc
     cbg_lines = []
     if cbg_total > 0:
-        cbg_lines.append(f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{cbg_total:,.0f}</span>"
-                         f"<span style='font-size:.65rem;color:#5a7a9a'> kg total</span>")
+        cbg_lines.append(f"<span style='font-size:1.1rem;font-weight:700;color:#1a56db'>{cbg_total:,.0f}</span>"
+                         f"<span style='font-size:.78rem;color:#5a7a9a'> kg total</span>")
         if cbg_casc > 0:
-            cbg_lines.append(f"<span style='font-size:.78rem;color:#c84b00'>{cbg_disp:,.0f}</span>"
-                             f"<span style='font-size:.63rem;color:#5a7a9a'> disp · </span>"
-                             f"<span style='font-size:.78rem;color:#7b1fa2'>{cbg_casc:,.0f}</span>"
-                             f"<span style='font-size:.63rem;color:#5a7a9a'> casc</span>")
+            cbg_lines.append(f"<span style='font-size:.92rem;color:#c84b00'>{cbg_disp:,.0f}</span>"
+                             f"<span style='font-size:.76rem;color:#5a7a9a'> disp · </span>"
+                             f"<span style='font-size:.92rem;color:#7b1fa2'>{cbg_casc:,.0f}</span>"
+                             f"<span style='font-size:.76rem;color:#5a7a9a'> casc</span>")
     cbg_html = "<br>".join(cbg_lines) if cbg_lines else "–"
 
     # ── Gas flared total ──────────────────────────────────────────────────────
@@ -1059,31 +1059,31 @@ def _kpi_cards(df, label_prefix=""):
     # Actual (CBG Mass FM)
     if not _math.isnan(cbg_fm_avg):
         gen_kg_lines.append(
-            f"<span style='font-size:.85rem;font-weight:700;color:#1a56db'>{fmt(cbg_fm_avg, 0)}</span>"
-            f"<span style='font-size:.63rem;color:#5a7a9a'> kg/day actual</span>")
+            f"<span style='font-size:1.05rem;font-weight:700;color:#1a56db'>{fmt(cbg_fm_avg, 0)}</span>"
+            f"<span style='font-size:.76rem;color:#5a7a9a'> kg/day actual</span>")
     if not _math.isnan(cbg_fm_sum):
         gen_kg_lines.append(
-            f"<span style='font-size:.75rem;color:#1a56db'>{fmt(cbg_fm_sum, 0)}</span>"
-            f"<span style='font-size:.61rem;color:#5a7a9a'> kg total actual</span>")
+            f"<span style='font-size:.9rem;color:#1a56db'>{fmt(cbg_fm_sum, 0)}</span>"
+            f"<span style='font-size:.74rem;color:#5a7a9a'> kg total actual</span>")
     # Divider — only shown when both sides have data
     if gen_kg_lines and (not _math.isnan(exp_gas_avg) or not _math.isnan(exp_gas_sum)):
-        gen_kg_lines.append("<span style='font-size:.55rem;color:#c5d5eb'>────────────</span>")
+        gen_kg_lines.append("<span style='font-size:.68rem;color:#c5d5eb'>────────────</span>")
     # Expected
     if not _math.isnan(exp_gas_avg):
         gen_kg_lines.append(
-            f"<span style='font-size:.85rem;font-weight:700;color:#c84b00'>{fmt(exp_gas_avg, 0)}</span>"
-            f"<span style='font-size:.63rem;color:#5a7a9a'> kg/day expected</span>")
+            f"<span style='font-size:1.05rem;font-weight:700;color:#c84b00'>{fmt(exp_gas_avg, 0)}</span>"
+            f"<span style='font-size:.76rem;color:#5a7a9a'> kg/day expected</span>")
     if not _math.isnan(exp_gas_sum):
         gen_kg_lines.append(
-            f"<span style='font-size:.75rem;color:#c84b00'>{fmt(exp_gas_sum, 0)}</span>"
-            f"<span style='font-size:.61rem;color:#5a7a9a'> kg total expected</span>")
+            f"<span style='font-size:.9rem;color:#c84b00'>{fmt(exp_gas_sum, 0)}</span>"
+            f"<span style='font-size:.74rem;color:#5a7a9a'> kg total expected</span>")
     # Delta % (actual vs expected) — shown when both averages are available
     if not _math.isnan(cbg_fm_avg) and not _math.isnan(exp_gas_avg) and exp_gas_avg != 0:
         delta_pct = (cbg_fm_avg - exp_gas_avg) / exp_gas_avg * 100
         delta_color = "#2e7d32" if delta_pct >= 0 else "#b71c1c"
         delta_sign  = "▲" if delta_pct >= 0 else "▼"
         gen_kg_lines.append(
-            f"<span style='font-size:.72rem;font-weight:600;color:{delta_color}'>"
+            f"<span style='font-size:.85rem;font-weight:600;color:{delta_color}'>"
             f"{delta_sign} {abs(delta_pct):.1f}% vs expected</span>")
     gen_kg_html = "<br>".join(gen_kg_lines) if gen_kg_lines else "–"
 
@@ -1092,11 +1092,11 @@ def _kpi_cards(df, label_prefix=""):
     # Row 2:  Total CBG Sales | Gas Flared | Avg CH₄ Pure | Electricity | (MFM placeholder)
 
     def _card(icon, label, value_html, unit="", opt_note=""):
-        opt_bar = f"<div style='font-size:.6rem;color:#2e7d32;margin-top:2px'>{opt_note}</div>" if opt_note else ""
+        opt_bar = f"<div style='font-size:.74rem;color:#2e7d32;margin-top:2px'>{opt_note}</div>" if opt_note else ""
         return f"""
 <div class="kpi-card">
   <div class="kpi-icon">{icon}</div>
-  <div class="kpi-value" style="font-size:1.25rem">{value_html}</div>
+  <div class="kpi-value" style="font-size:1.4rem">{value_html}</div>
   <div class="kpi-label">{label}{(' · ' + unit) if unit else ''}</div>
   {opt_bar}
 </div>"""
@@ -1107,12 +1107,12 @@ def _kpi_cards(df, label_prefix=""):
     raw_gen_lines = []
     if not _math.isnan(raw_gen_avg):
         raw_gen_lines.append(
-            f"<span style='font-size:.9rem;font-weight:700;color:#1a56db'>{fmt(raw_gen_avg, 0)}</span>"
-            f"<span style='font-size:.63rem;color:#5a7a9a'> m³/d generated</span>")
+            f"<span style='font-size:1.1rem;font-weight:700;color:#1a56db'>{fmt(raw_gen_avg, 0)}</span>"
+            f"<span style='font-size:.76rem;color:#5a7a9a'> m³/d generated</span>")
     if not _math.isnan(raw_inlet_avg):
         raw_gen_lines.append(
-            f"<span style='font-size:.9rem;font-weight:700;color:#2e7d32'>{fmt(raw_inlet_avg, 0)}</span>"
-            f"<span style='font-size:.63rem;color:#5a7a9a'> m³/d inlet (purif)</span>")
+            f"<span style='font-size:1.1rem;font-weight:700;color:#2e7d32'>{fmt(raw_inlet_avg, 0)}</span>"
+            f"<span style='font-size:.76rem;color:#5a7a9a'> m³/d inlet (purif)</span>")
     # Gen–Inlet diff if both present
     if not _math.isnan(raw_gen_avg) and not _math.isnan(raw_inlet_avg):
         diff = raw_gen_avg - raw_inlet_avg
@@ -2383,21 +2383,21 @@ def tab_kpi_page(ops, all_data, selected, date_filter):
                        opt_note="", prefix="", show_total=True, dec=1):
         total_line = ""
         if show_total and not _m.isnan(total):
-            total_line = (f"<div style='font-size:.68rem;color:#5a7a9a;margin-top:1px'>"
+            total_line = (f"<div style='font-size:.82rem;color:#5a7a9a;margin-top:1px'>"
                           f"Σ {_fmt(total, dec)} {unit}</div>")
         minmax = ""
         if not _m.isnan(mn) and not _m.isnan(mx):
-            minmax = (f"<div style='font-size:.63rem;color:#8aaac8;margin-top:1px'>"
+            minmax = (f"<div style='font-size:.76rem;color:#8aaac8;margin-top:1px'>"
                       f"min {_fmt(mn,dec)} · max {_fmt(mx,dec)}</div>")
-        opt_html = (f"<div style='font-size:.62rem;color:#2e7d32;margin-top:2px'>{opt_note}</div>"
+        opt_html = (f"<div style='font-size:.76rem;color:#2e7d32;margin-top:2px'>{opt_note}</div>"
                     if opt_note else "")
         avg_disp = _fmt(avg, dec) if not _m.isnan(avg) else "–"
         return f"""
 <div class="kpi-card" style="min-width:140px">
-  <div style="font-size:.95rem;margin-bottom:3px">{icon}</div>
-  <div style="font-size:1.22rem;font-weight:700;color:#1a56db;font-family:'Space Mono',monospace;line-height:1.1">{avg_disp}</div>
-  <div style="font-size:.61rem;color:#5a7a9a;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">{label}</div>
-  <div style="font-size:.65rem;color:#7a96b2">{unit}/day avg &nbsp;<span style="color:{trend_col};font-weight:700">{trend_sym}</span></div>
+  <div style="font-size:1.1rem;margin-bottom:3px">{icon}</div>
+  <div style="font-size:1.45rem;font-weight:700;color:#1a56db;font-family:'Space Mono',monospace;line-height:1.1">{avg_disp}</div>
+  <div style="font-size:.74rem;color:#5a7a9a;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">{label}</div>
+  <div style="font-size:.8rem;color:#7a96b2">{unit}/day avg &nbsp;<span style="color:{trend_col};font-weight:700">{trend_sym}</span></div>
   {total_line}{minmax}{opt_html}
 </div>"""
 
