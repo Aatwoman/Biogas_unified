@@ -858,7 +858,10 @@ def sidebar():
         if uploaded:
             for f in uploaded:
                 rb = f.read()
-                default = f.name.replace(".xlsb","").replace(".xlsx","").replace("_"," ").title()
+                import re as _re
+                _stem = f.name.replace(".xlsb","").replace(".xlsx","").replace("_"," ")
+                _stem = _re.sub(r'(?i)^\s*unified[\s_-]*', '', _stem).strip()
+                default = _stem.title() or f.name
                 pname = st.text_input(f"Label: {f.name[:28]}", value=default, key=f"pn_{f.name}")
                 with st.spinner(f"Loading {pname}…"):
                     all_data[pname] = load_plant(rb, pname, fname=f.name)
